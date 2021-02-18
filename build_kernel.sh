@@ -2,7 +2,7 @@
 
 export ARCH=arm64
 mkdir out
-export SEC_BUILD_CONF_SIGNER_MODEL_NAME=SM-G970U_NA_VZW_USA0
+export SEC_BUILD_CONF_SIGNER_MODEL_NAME=SM-G973U_NA_VZW_USA0
 PIL_SPLITER=$(pwd)/tools/pil_splitter.py
 BUILD_CROSS_COMPILE=$(pwd)/toolchain/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin/aarch64-linux-android-
 KERNEL_LLVM_BIN=$(pwd)/toolchain/llvm-arm-toolchain-ship/10.0/bin/clang
