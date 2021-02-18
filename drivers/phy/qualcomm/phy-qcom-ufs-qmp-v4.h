@@ -260,6 +260,7 @@ static struct ufs_qcom_phy_calibration phy_cal_table_rate_A[] = {
 };
 
 static struct ufs_qcom_phy_calibration phy_cal_table_rate_A_g3[] = {
+	// G3 only settings
 	UFS_QCOM_PHY_CAL_ENTRY(UFS_PHY_PLL_CNTL, 0x03),
 	UFS_QCOM_PHY_CAL_ENTRY(UFS_PHY_TIMER_20US_CORECLK_STEPS_MSB, 0x16),
 	UFS_QCOM_PHY_CAL_ENTRY(UFS_PHY_TIMER_20US_CORECLK_STEPS_LSB, 0xD8),

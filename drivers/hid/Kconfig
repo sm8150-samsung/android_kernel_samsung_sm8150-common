@@ -1054,6 +1054,20 @@ config HID_QVR
 	Say 'Y' or 'M' if you want to connect an external device to
 	stream sensor data for QVR support.
 
+config HID_OVR
+	tristate "OVR device support"
+	depends on USB_HID
+	---help---
+	Support for OVR devices.
+	Say Y here if you have a OVR device.
+
+config HID_TVR
+	tristate "TVR device support"
+	depends on USB_HID
+	---help---
+	Support for TVR devices.
+	Say Y here if you have a TVR device.	
+
 endmenu
 
 endif # HID

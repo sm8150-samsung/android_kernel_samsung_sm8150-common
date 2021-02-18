@@ -105,12 +105,12 @@ int ion_heap_map_user(struct ion_heap *heap, struct ion_buffer *buffer,
 
 static int ion_heap_clear_pages(struct page **pages, int num, pgprot_t pgprot)
 {
-	void *addr = vm_map_ram(pages, num, -1, pgprot);
+	void *addr = vmap(pages, num, VM_MAP, pgprot);
 
 	if (!addr)
 		return -ENOMEM;
 	memset(addr, 0, PAGE_SIZE * num);
-	vm_unmap_ram(addr, num);
+	vunmap(addr);
 
 	return 0;
 }
@@ -331,6 +331,11 @@ struct ion_heap *ion_heap_create(struct ion_platform_heap *heap_data)
 	case ION_HEAP_TYPE_SYSTEM:
 		heap = ion_system_heap_create(heap_data);
 		break;
+#ifdef CONFIG_ION_RBIN_HEAP
+	case ION_HEAP_TYPE_RBIN:
+		heap = ion_rbin_heap_create(heap_data);
+		break;
+#endif
 	case ION_HEAP_TYPE_CARVEOUT:
 		heap = ion_carveout_heap_create(heap_data);
 		break;

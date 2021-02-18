@@ -335,6 +335,7 @@ int diag_md_copy_to_user(char __user *buf, int *pret, size_t buf_size,
 		ch = &diag_md[i];
 		if (!ch->md_info_inited)
 			continue;
+		
 		for (j = 0; j < ch->num_tbl_entries && !err; j++) {
 			spin_lock_irqsave(&ch->lock, flags);
 			entry = &ch->tbl[j];

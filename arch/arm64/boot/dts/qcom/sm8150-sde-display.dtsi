@@ -35,7 +35,7 @@
 #include "dsi-panel-rm69299-visionox-amoled-fhd-plus-video.dtsi"
 #include <dt-bindings/clock/mdss-10nm-pll-clk.h>
 
-&tlmm {
+/*&tlmm {
 	display_panel_avdd_eldo_default: display_panel_avdd_eldo_default {
 		mux {
 			pins = "gpio130";
@@ -48,7 +48,7 @@
 			output-high;
 		};
 	};
-};
+};*/
 
 &soc {
 	dsi_panel_pwr_supply: dsi_panel_pwr_supply {
@@ -175,11 +175,13 @@
 		regulator-min-microvolt = <1800000>;
 		regulator-max-microvolt = <1800000>;
 		regulator-enable-ramp-delay = <233>;
-		gpio = <&tlmm 130 0>;
+/*		gpio = <&tlmm 130 0>;*/
 		enable-active-high;
 		regulator-boot-on;
+/*
 		pinctrl-names = "default";
 		pintctrl-0 = <&display_panel_avdd_eldo_default>;
+*/
 	};
 
 	dsi_sharp_4k_dsc_video_display: qcom,dsi-display@0 {
@@ -559,7 +561,7 @@
 };
 
 &sde_dp {
-	qcom,dp-usbpd-detection = <&pm8150b_pdphy>;
+	//qcom,dp-usbpd-detection = <&pm8150b_pdphy>;
 	qcom,ext-disp = <&ext_disp>;
 	qcom,dp-aux-switch = <&fsa4480>;
 

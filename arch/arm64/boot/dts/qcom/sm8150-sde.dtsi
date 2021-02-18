@@ -294,8 +294,9 @@
 		cell-index = <0>;
 		compatible = "qcom,sde-rsc";
 		reg = <0xaf20000 0x1c44>,
-			<0xaf30000 0x3fd4>;
-		reg-names = "drv", "wrapper";
+		    <0xaf30000 0x3fd4>,
+		    <0xaf00000 0x08008>;
+		reg-names = "drv", "wrapper", "dispcc";
 		qcom,sde-rsc-version = <2>;
 
 		vdd-supply = <&mdss_core_gdsc>;

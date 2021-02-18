@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -78,7 +78,6 @@ int cam_ipe_init_hw(void *device_priv,
 	cpas_vote.ahb_vote.type = CAM_VOTE_ABSOLUTE;
 	cpas_vote.ahb_vote.vote.level = CAM_SVS_VOTE;
 	cpas_vote.axi_vote.compressed_bw = CAM_CPAS_DEFAULT_AXI_BW;
-	cpas_vote.axi_vote.compressed_bw_ab = CAM_CPAS_DEFAULT_AXI_BW;
 	cpas_vote.axi_vote.uncompressed_bw = CAM_CPAS_DEFAULT_AXI_BW;
 
 	rc = cam_cpas_start(core_info->cpas_handle,
@@ -224,12 +223,6 @@ static int cam_ipe_cmd_reset(struct cam_hw_soc_info *soc_info,
 	bool reset_ipe_top_fail = false;
 
 	CAM_DBG(CAM_ICP, "CAM_ICP_IPE_CMD_RESET");
-	if (!core_info->clk_enable || !core_info->cpas_start) {
-		CAM_ERR(CAM_HFI, "IPE reset failed. clk_en %d cpas_start %d",
-				core_info->clk_enable, core_info->cpas_start);
-		return -EINVAL;
-	}
-
 	/* IPE CDM core reset*/
 	cam_io_w_mb((uint32_t)0xF,
 		soc_info->reg_map[0].mem_base + IPE_CDM_RST_CMD);
@@ -292,6 +285,28 @@ static int cam_ipe_cmd_reset(struct cam_hw_soc_info *soc_info,
 	return rc;
 }
 
+static void cam_ipe_cmd_dump_pwr_sts(
+	struct cam_hw_info *ipe_dev)
+{
+	struct cam_ipe_device_core_info *core_info = NULL;
+	struct cam_ipe_device_hw_info *hw_info = NULL;
+	uint32_t pwr_status = 0xEFEF;
+	uint32_t pwr_ctrl = 0xFEFE;
+
+	core_info = (struct cam_ipe_device_core_info *)ipe_dev->core_info;
+	hw_info = core_info->ipe_hw_info;
+
+	cam_cpas_reg_read(core_info->cpas_handle,
+		CAM_CPAS_REG_CPASTOP, hw_info->pwr_ctrl,
+		true, &pwr_ctrl);
+
+	cam_cpas_reg_read(core_info->cpas_handle,
+		CAM_CPAS_REG_CPASTOP, hw_info->pwr_status,
+		true, &pwr_status);
+	CAM_INFO(CAM_ICP, "pwr_ctrl 0x%x pwr_status = 0x%x",
+		pwr_ctrl, pwr_status);
+}
+
 int cam_ipe_process_cmd(void *device_priv, uint32_t cmd_type,
 	void *cmd_args, uint32_t arg_size)
 {
@@ -342,11 +357,7 @@ int cam_ipe_process_cmd(void *device_priv, uint32_t cmd_type,
 
 	case CAM_ICP_IPE_CMD_CPAS_STOP:
 		if (core_info->cpas_start) {
-			rc = cam_cpas_stop(core_info->cpas_handle);
-			if (rc) {
-				CAM_ERR(CAM_ICP, "CPAS stop failed %d", rc);
-				return rc;
-			}
+			cam_cpas_stop(core_info->cpas_handle);
 			core_info->cpas_start = false;
 		}
 		break;
@@ -394,6 +405,9 @@ int cam_ipe_process_cmd(void *device_priv, uint32_t cmd_type,
 		break;
 	case CAM_ICP_IPE_CMD_RESET:
 		rc = cam_ipe_cmd_reset(soc_info, core_info);
+		break;
+	case CAM_ICP_IPE_CMD_PWR_STS:
+		cam_ipe_cmd_dump_pwr_sts(ipe_dev);
 		break;
 	default:
 		CAM_ERR(CAM_ICP, "Invalid Cmd Type:%u", cmd_type);

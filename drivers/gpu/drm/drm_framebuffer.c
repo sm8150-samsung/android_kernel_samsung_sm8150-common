@@ -27,6 +27,7 @@
 #include <drm/drm_atomic.h>
 
 #include "drm_crtc_internal.h"
+#include "msm/sde/sde_trace.h"
 
 /**
  * DOC: overview
@@ -326,6 +327,7 @@ int drm_mode_addfb2(struct drm_device *dev,
 	struct drm_mode_fb_cmd2 *r = data;
 	struct drm_framebuffer *fb;
 
+	SDE_ATRACE_BEGIN("drm_mode_addfb2");
 	if (!drm_core_check_feature(dev, DRIVER_MODESET))
 		return -EINVAL;
 
@@ -341,6 +343,7 @@ int drm_mode_addfb2(struct drm_device *dev,
 	list_add(&fb->filp_head, &file_priv->fbs);
 	mutex_unlock(&file_priv->fbs_lock);
 
+	SDE_ATRACE_END("drm_mode_addfb2");
 	return 0;
 }
 

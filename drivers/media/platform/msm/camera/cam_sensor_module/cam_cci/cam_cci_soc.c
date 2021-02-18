@@ -43,19 +43,16 @@ int cam_cci_init(struct v4l2_subdev *sd,
 		return rc;
 	}
 
-	CAM_DBG(CAM_CCI, "Base address %pK", base);
+	CAM_INFO(CAM_CCI, "Init Base address %pK", base);
 
 	if (cci_dev->ref_count++) {
 		CAM_DBG(CAM_CCI, "ref_count %d", cci_dev->ref_count);
 		CAM_DBG(CAM_CCI, "master %d", master);
 		if (master < MASTER_MAX && master >= 0) {
-			mutex_lock(&cci_dev->cci_master_info[master].mutex);
 			flush_workqueue(cci_dev->write_wq[master]);
 			/* Re-initialize the completion */
 			reinit_completion(
 			&cci_dev->cci_master_info[master].reset_complete);
-			reinit_completion(
-			&cci_dev->cci_master_info[master].rd_done);
 			for (i = 0; i < NUM_QUEUES; i++)
 				reinit_completion(
 				&cci_dev->cci_master_info[master].report_q[i]);
@@ -74,7 +71,6 @@ int cam_cci_init(struct v4l2_subdev *sd,
 				CCI_TIMEOUT);
 			if (rc <= 0)
 				CAM_ERR(CAM_CCI, "wait failed %d", rc);
-			mutex_unlock(&cci_dev->cci_master_info[master].mutex);
 		}
 		return 0;
 	}
@@ -82,7 +78,6 @@ int cam_cci_init(struct v4l2_subdev *sd,
 	ahb_vote.type = CAM_VOTE_ABSOLUTE;
 	ahb_vote.vote.level = CAM_SVS_VOTE;
 	axi_vote.compressed_bw = CAM_CPAS_DEFAULT_AXI_BW;
-	axi_vote.compressed_bw_ab = CAM_CPAS_DEFAULT_AXI_BW;
 	axi_vote.uncompressed_bw = CAM_CPAS_DEFAULT_AXI_BW;
 
 	rc = cam_cpas_start(cci_dev->cpas_handle,
@@ -170,7 +165,6 @@ int cam_cci_init(struct v4l2_subdev *sd,
 		base + CCI_I2C_M0_RD_THRESHOLD_ADDR);
 	cam_io_w_mb(CCI_I2C_RD_THRESHOLD_VALUE,
 		base + CCI_I2C_M1_RD_THRESHOLD_ADDR);
-
 	cci_dev->cci_state = CCI_STATE_ENABLED;
 
 	return 0;
@@ -390,7 +384,7 @@ int cam_cci_soc_release(struct cci_device *cci_dev)
 		return -EINVAL;
 	}
 	if (--cci_dev->ref_count) {
-		CAM_DBG(CAM_CCI, "ref_count Exit %d", cci_dev->ref_count);
+		CAM_INFO(CAM_CCI, "ref_count Exit %d", cci_dev->ref_count);
 		return 0;
 	}
 	for (i = 0; i < MASTER_MAX; i++)
@@ -410,9 +404,8 @@ int cam_cci_soc_release(struct cci_device *cci_dev)
 	cci_dev->cci_state = CCI_STATE_DISABLED;
 	cci_dev->cycles_per_us = 0;
 
-	rc = cam_cpas_stop(cci_dev->cpas_handle);
-	if (rc)
-		CAM_ERR(CAM_CCI, "cpas stop failed %d", rc);
+	cam_cpas_stop(cci_dev->cpas_handle);
+	CAM_INFO(CAM_CCI, "CCI_SOC_RELEASE DONE");
 
 	return rc;
 }

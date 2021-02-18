@@ -56,6 +56,9 @@ struct schedtune {
 	/* Hint to bias scheduling of tasks on that SchedTune CGroup
 	 * towards idle CPUs */
 	int prefer_idle;
+
+	/* When sched_boost applied, perfer_perf task bias to prime cluster */
+	int prefer_prime;
 };
 
 static inline struct schedtune *css_st(struct cgroup_subsys_state *css)
@@ -92,6 +95,7 @@ root_schedtune = {
 	.colocate_update_disabled = false,
 #endif
 	.prefer_idle = 0,
+	.prefer_prime = 0,
 };
 
 /*
@@ -105,7 +109,7 @@ root_schedtune = {
  *    implementation especially for the computation of the per-CPU boost
  *    value
  */
-#define BOOSTGROUPS_COUNT 6
+#define BOOSTGROUPS_COUNT 8
 
 /* Array of configured boostgroups */
 static struct schedtune *allocated_group[BOOSTGROUPS_COUNT] = {
@@ -587,6 +591,26 @@ int schedtune_prefer_idle(struct task_struct *p)
 	return prefer_idle;
 }
 
+bool schedtune_prefer_prime(struct task_struct *p)
+{
+	struct schedtune *st;
+	int prefer_prime;
+
+	if (unlikely(!schedtune_initialized))
+		return 0;
+
+	/* Get prefer_prime value */
+	rcu_read_lock();
+	st = task_schedtune(p);
+	prefer_prime = st->prefer_prime;
+	rcu_read_unlock();
+
+	if(prefer_prime)
+		return sched_boost_policy() != SCHED_BOOST_NONE;
+
+	return false;
+}
+
 static u64
 prefer_idle_read(struct cgroup_subsys_state *css, struct cftype *cft)
 {
@@ -601,6 +625,24 @@ prefer_idle_write(struct cgroup_subsys_state *css, struct cftype *cft,
 {
 	struct schedtune *st = css_st(css);
 	st->prefer_idle = !!prefer_idle;
+
+	return 0;
+}
+
+static u64
+prefer_prime_read(struct cgroup_subsys_state *css, struct cftype *cft)
+{
+	struct schedtune *st = css_st(css);
+
+	return st->prefer_prime;
+}
+
+static int
+prefer_prime_write(struct cgroup_subsys_state *css, struct cftype *cft,
+	    u64 prefer_prime)
+{
+	struct schedtune *st = css_st(css);
+	st->prefer_prime = prefer_prime;
 
 	return 0;
 }
@@ -675,6 +717,11 @@ static struct cftype files[] = {
 		.name = "prefer_idle",
 		.read_u64 = prefer_idle_read,
 		.write_u64 = prefer_idle_write,
+	},
+	{
+		.name = "prefer_prime",
+		.read_u64 = prefer_prime_read,
+		.write_u64 = prefer_prime_write,
 	},
 	{ }	/* terminate */
 };

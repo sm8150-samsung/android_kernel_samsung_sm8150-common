@@ -775,6 +775,15 @@ void __init cpuhp_threads_init(void)
 	kthread_unpark(this_cpu_read(cpuhp_state.thread));
 }
 
+#if !defined(CONFIG_SEC_FACTORY)
+#include <soc/qcom/watchdog.h>
+static void cpu_hotplug_timer_function(unsigned long data) {
+	pr_err("[%s] cpu_%s took longer than 5 secs\n", __func__, (data == 1)?"up":"down");
+	msm_trigger_wdog_bite();
+};
+static DEFINE_TIMER(cpu_hp_timer, cpu_hotplug_timer_function, 0, 0);
+#endif
+
 #ifdef CONFIG_HOTPLUG_CPU
 /**
  * clear_tasks_mm_cpumask - Safely clear tasks' mm_cpumask for a CPU
@@ -1053,7 +1062,19 @@ static int do_cpu_down(unsigned int cpu, enum cpuhp_state target)
 
 int cpu_down(unsigned int cpu)
 {
-	return do_cpu_down(cpu, CPUHP_OFFLINE);
+#if !defined(CONFIG_SEC_FACTORY)
+	int ret;
+	cpu_hp_timer.expires = jiffies+5*HZ;
+	cpu_hp_timer.data = 0;
+
+	add_timer(&cpu_hp_timer);
+	ret = do_cpu_down(cpu, CPUHP_OFFLINE);
+	del_timer_sync(&cpu_hp_timer);
+
+	return ret;
+#else
+    return do_cpu_down(cpu, CPUHP_OFFLINE);
+#endif
 }
 EXPORT_SYMBOL(cpu_down);
 
@@ -1251,7 +1272,19 @@ out:
 
 int cpu_up(unsigned int cpu)
 {
+#if !defined(CONFIG_SEC_FACTORY)	
+	int ret = 0;
+	cpu_hp_timer.expires = jiffies + 5*HZ;
+	cpu_hp_timer.data = 1;
+
+	add_timer(&cpu_hp_timer);
+	ret = do_cpu_up(cpu, CPUHP_ONLINE);
+	del_timer_sync(&cpu_hp_timer);
+	
+	return ret;
+#else
 	return do_cpu_up(cpu, CPUHP_ONLINE);
+#endif	
 }
 EXPORT_SYMBOL_GPL(cpu_up);
 

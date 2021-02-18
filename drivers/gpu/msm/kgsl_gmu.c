@@ -542,7 +542,6 @@ static int gmu_dcvs_set(struct kgsl_device *device,
 		.bw = INVALID_DCVS_IDX,
 	};
 
-
 	/* If GMU has not been started, save it */
 	if (!test_bit(GMU_HFI_ON, &device->gmu_core.flags)) {
 		/* store clock change request */

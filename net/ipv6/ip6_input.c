@@ -129,11 +129,18 @@ int ipv6_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt
 	 * A packet received on an interface with a destination address
 	 * of loopback must be dropped.
 	 */
+	/*
+	 * EMBMS fix : multicasted embms src address cannot pass this condition.
+         * That drops here and got lost service
 	if ((ipv6_addr_loopback(&hdr->saddr) ||
 	     ipv6_addr_loopback(&hdr->daddr)) &&
 	     !(dev->flags & IFF_LOOPBACK))
 		goto err;
-
+	*/
+	if (!(dev->flags & IFF_LOOPBACK) &&
+             ipv6_addr_loopback(&hdr->daddr))
+		goto err;
+	
 	/* RFC4291 Errata ID: 3480
 	 * Interface-Local scope spans only a single interface on a
 	 * node and is useful only for loopback transmission of

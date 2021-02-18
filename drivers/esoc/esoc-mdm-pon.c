@@ -266,6 +266,15 @@ static int mdm4x_pon_dt_init(struct mdm_ctrl *mdm)
 	struct device_node *node = mdm->dev->of_node;
 	enum of_gpio_flags flags = OF_GPIO_ACTIVE_LOW;
 
+	val = of_get_named_gpio_flags(node, "qcom,mdm-pmic-pwr-status",
+						0, &flags);
+	if (val >= 0) {
+		dev_info(mdm->dev, "MDM_PMIC_PWR_STATUS gpio configured = %d\n", val);
+		MDM_GPIO(mdm, MDM_PMIC_PWR_STATUS) = val;
+	}
+	else
+		dev_err(mdm->dev, "Cannot config MDM_PMIC_PWR_STATUS gpio\n");
+
 	val = of_get_named_gpio_flags(node, "qcom,ap2mdm-soft-reset-gpio",
 						0, &flags);
 	if (val >= 0) {
@@ -280,6 +289,15 @@ static int mdm4x_pon_dt_init(struct mdm_ctrl *mdm)
 static int mdm4x_pon_setup(struct mdm_ctrl *mdm)
 {
 	struct device *dev = mdm->dev;
+
+	if (gpio_is_valid(MDM_GPIO(mdm, MDM_PMIC_PWR_STATUS))) {
+		if (gpio_request(MDM_GPIO(mdm, MDM_PMIC_PWR_STATUS),
+					 "MDM_PMIC_PWR_STATUS")) {
+			dev_err(dev, "Cannot request MDM_PMIC_PWR_STATUS gpio\n");
+			return -EIO;
+		}
+		gpio_direction_input(MDM_GPIO(mdm, MDM_PMIC_PWR_STATUS));
+	}
 
 	if (gpio_is_valid(MDM_GPIO(mdm, AP2MDM_SOFT_RESET))) {
 		if (gpio_request(MDM_GPIO(mdm, AP2MDM_SOFT_RESET),

@@ -45,6 +45,13 @@
 #include <linux/notifier.h>
 #endif
 
+#ifdef CONFIG_SEC_PM
+#include <linux/sec-pinmux.h>
+#ifdef CONFIG_SEC_GPIO_DVS
+#include <linux/secgpio_dvs.h>
+#endif
+#endif
+
 #define MAX_NR_GPIO 300
 #define PS_HOLD_OFFSET 0x820
 
@@ -59,6 +66,11 @@ struct msm_gpio_regs {
 struct msm_tile {
 	u32 dir_con_regs[8];
 };
+#endif
+
+#ifdef CONFIG_MST_LDO
+#define MST_GPIO_D_EN 11 
+#define MST_GPIO_D_DATA 12 
 #endif
 
 /**
@@ -103,8 +115,10 @@ struct msm_pinctrl {
 	unsigned int *spi_cfg_regs_val;
 #endif
 };
-
 static struct msm_pinctrl *msm_pinctrl_data;
+
+static int total_pin_count=0;
+
 static void __iomem *reassign_pctrl_reg(
 		const struct msm_pinctrl_soc_data *soc,
 				u32 gpio_id)
@@ -210,6 +224,9 @@ static int msm_pinmux_set_mux(struct pinctrl_dev *pctldev,
 	u32 val, mask;
 	int i;
 
+	if(!msm_gpio_is_valid(group))
+		return 0;
+
 	g = &pctrl->soc->groups[group];
 	base = reassign_pctrl_reg(pctrl->soc, group);
 	mask = GENMASK(g->mux_bit + order_base_2(g->nfuncs) - 1, g->mux_bit);
@@ -300,6 +317,9 @@ static int msm_config_group_get(struct pinctrl_dev *pctldev,
 	int ret;
 	u32 val;
 
+	if(!msm_gpio_is_valid(group))
+		return 0;
+
 	g = &pctrl->soc->groups[group];
 	base = reassign_pctrl_reg(pctrl->soc, group);
 
@@ -380,6 +400,9 @@ static int msm_config_group_set(struct pinctrl_dev *pctldev,
 	int ret;
 	u32 val;
 	int i;
+
+	 if(!msm_gpio_is_valid(group))
+                return 0;
 
 	g = &pctrl->soc->groups[group];
 	base = reassign_pctrl_reg(pctrl->soc, group);
@@ -473,6 +496,16 @@ static struct pinctrl_desc msm_pinctrl_desc = {
 	.owner = THIS_MODULE,
 };
 
+static int msm_gpio_request(struct gpio_chip *gc, unsigned off)
+{
+	pr_err("%s: off[%d]\n",__func__,off);
+
+	if(!msm_gpio_is_valid(off))
+		return -1;
+	
+	return gpiochip_generic_request(gc, off);
+}
+
 static int msm_gpio_direction_input(struct gpio_chip *chip, unsigned offset)
 {
 	const struct msm_pingroup *g;
@@ -480,6 +513,9 @@ static int msm_gpio_direction_input(struct gpio_chip *chip, unsigned offset)
 	unsigned long flags;
 	void __iomem *base;
 	u32 val;
+
+	if(!msm_gpio_is_valid(offset))
+		return -1;
 
 	g = &pctrl->soc->groups[offset];
 
@@ -502,6 +538,9 @@ static int msm_gpio_direction_output(struct gpio_chip *chip, unsigned offset, in
 	unsigned long flags;
 	void __iomem *base;
 	u32 val;
+
+	if(!msm_gpio_is_valid(offset))
+		return -1;
 
 	g = &pctrl->soc->groups[offset];
 
@@ -531,6 +570,9 @@ static int msm_gpio_get_direction(struct gpio_chip *chip, unsigned int offset)
 	void __iomem *base;
 	u32 val;
 
+	if(!msm_gpio_is_valid(offset))
+		return -1;
+
 	g = &pctrl->soc->groups[offset];
 	base = reassign_pctrl_reg(pctrl->soc, offset);
 
@@ -547,6 +589,9 @@ static int msm_gpio_get(struct gpio_chip *chip, unsigned offset)
 	void __iomem *base;
 	u32 val;
 
+	if(!msm_gpio_is_valid(offset))
+		return -1;
+
 	g = &pctrl->soc->groups[offset];
 	base = reassign_pctrl_reg(pctrl->soc, offset);
 
@@ -562,6 +607,9 @@ static void msm_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
 	void __iomem *base;
 	u32 val;
 
+	if(!msm_gpio_is_valid(offset))
+		return;
+
 	g = &pctrl->soc->groups[offset];
 	base = reassign_pctrl_reg(pctrl->soc, offset);
 
@@ -576,6 +624,113 @@ static void msm_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
 
 	raw_spin_unlock_irqrestore(&pctrl->lock, flags);
 }
+
+#ifdef CONFIG_SEC_PM_DEBUG
+int msm_set_gpio_status(struct gpio_chip *chip, uint pin_no, uint id, bool level)
+{
+	const struct msm_pingroup *g;
+	struct msm_pinctrl *pctrl = gpiochip_get_data(chip);
+	unsigned long flags;
+	u32 cfg_val, inout_val;
+	u32 mask = 0, shft = 0, data;
+
+	 if(!msm_gpio_is_valid(pin_no))
+                return 0;
+
+	g = &pctrl->soc->groups[pin_no];
+
+	raw_spin_lock_irqsave(&pctrl->lock, flags);
+	inout_val = readl(pctrl->regs + g->io_reg);
+	cfg_val = readl(pctrl->regs + g->ctl_reg);
+
+	/* Get mask and shft values for this config type */
+	switch (id) {
+	case GPIO_DVS_CFG_PULL_DOWN:
+		mask = GPIOMUX_PULL_MASK;
+		shft = GPIOMUX_PULL_SHFT;
+		data = GPIOMUX_PULL_DOWN;
+		break;
+	case GPIO_DVS_CFG_PULL_UP:
+		mask = GPIOMUX_PULL_MASK;
+		shft = GPIOMUX_PULL_SHFT;
+		data = GPIOMUX_PULL_UP;
+		break;
+	case GPIO_DVS_CFG_PULL_NONE:
+		mask = GPIOMUX_PULL_MASK;
+		shft = GPIOMUX_PULL_SHFT;
+		data = GPIOMUX_PULL_NONE;
+		break;
+	case GPIO_DVS_CFG_OUTPUT:
+		mask = GPIOMUX_DIR_MASK;
+		shft = GPIOMUX_DIR_SHFT;
+		data = level;
+		inout_val = dir_to_inout_val(data);
+		writel(inout_val, pctrl->regs + g->io_reg);
+		data = mask;
+		break;
+	default:
+		return -EINVAL;
+	};
+
+	cfg_val &= ~(mask << shft);
+	cfg_val |= (data << shft);
+	writel(cfg_val, pctrl->regs + g->ctl_reg);
+	raw_spin_unlock_irqrestore(&pctrl->lock, flags);
+
+	return 0;
+}
+
+void msm_gp_get_cfg(struct gpio_chip *chip, uint pin_no, struct gpiomux_setting *val)
+{
+	const struct msm_pingroup *g;
+	struct msm_pinctrl *pctrl = gpiochip_get_data(chip);
+	unsigned long flags;
+	u32 cfg_val, inout_val;
+
+	g = &pctrl->soc->groups[pin_no];
+
+	if(!msm_gpio_is_valid(pin_no))
+		return;
+
+	raw_spin_lock_irqsave(&pctrl->lock, flags);
+	inout_val = readl(pctrl->regs + g->io_reg);
+	cfg_val = readl(pctrl->regs + g->ctl_reg);
+
+	val->pull = cfg_val & 0x3;
+	val->func = (cfg_val >> 2) & 0xf;
+	val->drv = (cfg_val >> 6) & 0x7;
+	val->dir = cfg_val & BIT_MASK(9) ? 1 : GPIOMUX_IN;
+
+	if ((val->func == GPIOMUX_FUNC_GPIO) && (val->dir))
+		val->dir = inout_val & BIT_MASK(1) ?
+		GPIOMUX_OUT_HIGH : GPIOMUX_OUT_LOW;
+	raw_spin_unlock_irqrestore(&pctrl->lock, flags);
+}
+
+int msm_gp_get_value(struct gpio_chip *chip, uint pin_no, int in_out_type)
+{
+	const struct msm_pingroup *g;
+	struct msm_pinctrl *pctrl = gpiochip_get_data(chip);
+	unsigned long flags;
+	u32 inout_val;
+
+	g = &pctrl->soc->groups[pin_no];
+
+	if(!msm_gpio_is_valid(pin_no))
+		return 0;
+
+	raw_spin_lock_irqsave(&pctrl->lock, flags);
+	inout_val = readl(pctrl->regs + g->io_reg);
+	raw_spin_unlock_irqrestore(&pctrl->lock, flags);
+
+	if (in_out_type == GPIOMUX_IN)
+		return (inout_val & BIT(GPIO_IN_BIT)) >> GPIO_IN_BIT;
+	else
+		return (inout_val & BIT(GPIO_OUT_BIT)) >> GPIO_OUT_BIT;
+
+	return 0;
+}
+#endif
 
 #ifdef CONFIG_DEBUG_FS
 #include <linux/seq_file.h>
@@ -622,6 +777,9 @@ static void msm_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 	unsigned i;
 
 	for (i = 0; i < chip->ngpio; i++, gpio++) {
+		if(!msm_gpio_is_valid(i))
+			continue;
+
 		msm_gpio_dbg_show_one(s, NULL, chip, i, gpio);
 		seq_puts(s, "\n");
 	}
@@ -637,10 +795,38 @@ static const struct gpio_chip msm_gpio_template = {
 	.get_direction    = msm_gpio_get_direction,
 	.get              = msm_gpio_get,
 	.set              = msm_gpio_set,
-	.request          = gpiochip_generic_request,
+	.request          = msm_gpio_request,
 	.free             = gpiochip_generic_free,
 	.dbg_show         = msm_gpio_dbg_show,
 };
+
+bool msm_gpio_is_valid(int gpionum)
+{
+	if (gpionum < 0 || gpionum >= total_pin_count)
+		return 0;
+
+#ifdef ENABLE_SENSORS_FPRINT_SECURE
+	if (gpionum >= CONFIG_SENSORS_FP_SPI_GPIO_START
+			&& gpionum <= CONFIG_SENSORS_FP_SPI_GPIO_END)
+		return 0;
+#endif
+#ifdef CONFIG_SEC_5GMODEL
+	if (gpionum == 4 || gpionum == 5 || gpionum == 83 || gpionum ==84)  // HS UART for 5G check skip
+		return 0;
+#endif
+#ifdef CONFIG_ESE_SECURE
+	if (gpionum >= CONFIG_ESE_SPI_GPIO_START
+			&& gpionum <= CONFIG_ESE_SPI_GPIO_END)
+		return 0;
+#endif
+#ifdef CONFIG_MST_LDO
+	if (gpionum == MST_GPIO_D_EN || gpionum == MST_GPIO_D_DATA)
+		return 0;
+#endif
+
+	return 1;
+}
+
 
 /* For dual-edge interrupts in software, since some hardware has no
  * such support:
@@ -2111,6 +2297,7 @@ int msm_pinctrl_probe(struct platform_device *pdev,
 	msm_pinctrl_desc.name = dev_name(&pdev->dev);
 	msm_pinctrl_desc.pins = pctrl->soc->pins;
 	msm_pinctrl_desc.npins = pctrl->soc->npins;
+	total_pin_count = msm_pinctrl_desc.npins;
 	pctrl->pctrl = devm_pinctrl_register(&pdev->dev, &msm_pinctrl_desc,
 					     pctrl);
 	if (IS_ERR(pctrl->pctrl)) {

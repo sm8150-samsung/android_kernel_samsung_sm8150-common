@@ -66,14 +66,21 @@
 
 enum kgsl_iommu_reg_map {
 	KGSL_IOMMU_CTX_SCTLR = 0,
+	KGSL_IOMMU_CTX_ACTLR,
+	KGSL_IOMMU_CTX_RESUME,
+	KGSL_IOMMU_CTX_TCR,
 	KGSL_IOMMU_CTX_TTBR0,
+	KGSL_IOMMU_CTX_TTBR1,
+	KGSL_IOMMU_CTX_TTBCR,
 	KGSL_IOMMU_CTX_CONTEXTIDR,
+	KGSL_IOMMU_CTX_MAIR0,
+	KGSL_IOMMU_CTX_MAIR1,
 	KGSL_IOMMU_CTX_FSR,
 	KGSL_IOMMU_CTX_FAR,
-	KGSL_IOMMU_CTX_TLBIALL,
-	KGSL_IOMMU_CTX_RESUME,
 	KGSL_IOMMU_CTX_FSYNR0,
 	KGSL_IOMMU_CTX_FSYNR1,
+	KGSL_IOMMU_CTX_IPAFAR,
+	KGSL_IOMMU_CTX_TLBIALL,
 	KGSL_IOMMU_CTX_TLBSYNC,
 	KGSL_IOMMU_CTX_TLBSTATUS,
 	KGSL_IOMMU_REG_MAX
@@ -100,8 +107,8 @@ enum kgsl_iommu_context_id {
  * @cb_num: The hardware context bank number, used for calculating register
  *		offsets.
  * @kgsldev: The kgsl device that uses this context.
- * @fault: Flag when set indicates that this iommu device has caused a page
- * fault
+ * @stalled_on_fault: Flag when set indicates that this iommu device is stalled
+ * on a page fault
  * @gpu_offset: Offset of this context bank in the GPU register space
  * @default_pt: The default pagetable for this context,
  *		it may be changed by self programming.
@@ -112,7 +119,7 @@ struct kgsl_iommu_context {
 	enum kgsl_iommu_context_id id;
 	unsigned int cb_num;
 	struct kgsl_device *kgsldev;
-	int fault;
+	bool stalled_on_fault;
 	void __iomem *regbase;
 	unsigned int gpu_offset;
 	struct kgsl_pagetable *default_pt;

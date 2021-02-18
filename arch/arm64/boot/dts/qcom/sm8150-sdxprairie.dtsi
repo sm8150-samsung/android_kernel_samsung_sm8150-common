@@ -60,6 +60,7 @@
 		mhi_chan@25 {
 			mhi,num-elements = <32>;
 			mhi,event-ring = <1>;
+			status = "okay";
 		};
 
 		mhi_chan@80 {

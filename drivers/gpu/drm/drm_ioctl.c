@@ -38,6 +38,7 @@
 #include <linux/pci.h>
 #include <linux/export.h>
 #include <linux/nospec.h>
+#include "msm/sde/sde_trace.h"
 
 /**
  * DOC: getunique and setversion story
@@ -779,6 +780,7 @@ long drm_ioctl(struct file *filp,
 	if (drm_dev_is_unplugged(dev))
 		return -ENODEV;
 
+	SDE_ATRACE_BEGIN("drm_ioctl");
 	is_driver_ioctl = nr >= DRM_COMMAND_BASE && nr < DRM_COMMAND_END;
 
 	if (is_driver_ioctl) {
@@ -852,6 +854,8 @@ long drm_ioctl(struct file *filp,
 		kfree(kdata);
 	if (retcode)
 		DRM_DEBUG("ret = %d\n", retcode);
+
+	SDE_ATRACE_END("drm_ioctl");
 	return retcode;
 }
 EXPORT_SYMBOL(drm_ioctl);

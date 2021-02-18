@@ -1393,6 +1393,9 @@ static int of_parse_ch_cfg(struct mhi_controller *mhi_cntrl,
 		mhi_chan->wake_capable = of_property_read_bool(child,
 							"mhi,wake-capable");
 
+		mhi_chan->wake_capable = of_property_read_bool(child,
+								"mhi,wake-capable");
+
 		if (mhi_chan->pre_alloc &&
 		    (mhi_chan->dir != DMA_FROM_DEVICE ||
 		     mhi_chan->xfer_type != MHI_XFER_BUFFER))

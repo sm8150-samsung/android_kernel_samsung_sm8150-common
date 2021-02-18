@@ -1,4 +1,4 @@
-/* Copyright (c) 2016-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2016-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -62,7 +62,7 @@ struct handle {
  * @bits: size of bit map in bits
  */
 struct cam_req_mgr_util_hdl_tbl {
-	struct handle hdl[CAM_REQ_MGR_MAX_HANDLES];
+	struct handle hdl[CAM_REQ_MGR_MAX_HANDLES_V2];
 	void *bitmap;
 	size_t bits;
 };

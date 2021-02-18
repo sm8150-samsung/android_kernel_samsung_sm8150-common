@@ -34,6 +34,7 @@
 #include <drm/drmP.h>
 
 #include "drm_internal.h"
+#include "msm/sde/sde_trace.h"
 
 /*
  * DMA-BUF/GEM Object references and lifetime overview:
@@ -736,6 +737,7 @@ int drm_gem_prime_fd_to_handle(struct drm_device *dev,
 	if (IS_ERR(dma_buf))
 		return PTR_ERR(dma_buf);
 
+	SDE_ATRACE_BEGIN("drm_gem_prime_fd_to_handle");
 	mutex_lock(&file_priv->prime.lock);
 
 	ret = drm_prime_lookup_buf_handle(&file_priv->prime,
@@ -772,6 +774,7 @@ int drm_gem_prime_fd_to_handle(struct drm_device *dev,
 
 	dma_buf_put(dma_buf);
 
+	SDE_ATRACE_END("drm_gem_prime_fd_to_handle");
 	return 0;
 
 fail:

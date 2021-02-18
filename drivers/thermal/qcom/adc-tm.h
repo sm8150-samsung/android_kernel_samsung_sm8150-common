@@ -268,6 +268,10 @@ int therm_fwd_scale(int64_t code, uint32_t adc_hc_vdd_ref_mv,
 
 void adc_tm_scale_therm_voltage_100k(struct adc_tm_config *param,
 				const struct adc_tm_data *data);
+#ifdef CONFIG_SEC_EXT_THERMAL_MONITOR
+int sec_bat_convert_adc_to_temp(unsigned int adc_ch, int temp_adc);
+int sec_bat_get_thr_voltage(unsigned int adc_ch, int temp);
+#endif /* CONFIG_SEC_EXT_THERMAL_MONITOR */
 
 int32_t adc_tm_absolute_rthr(const struct adc_tm_data *data,
 			struct adc_tm_config *tm_config);

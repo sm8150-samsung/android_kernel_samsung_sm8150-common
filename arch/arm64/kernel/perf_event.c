@@ -609,6 +609,15 @@ static inline u32 armv8pmu_getreset_flags(void)
 	return value;
 }
 
+static inline u32 armv8pmu_getinensel_val(void) 
+{
+	u32 value;
+	value = read_sysreg(pmintenset_el1); 
+	value &= 0xFFFFFFFF; 
+
+	return value;
+}
+
 static void armv8pmu_enable_event(struct perf_event *event)
 {
 	unsigned long flags;
@@ -709,7 +718,7 @@ static inline void armv8pmu_set_enabled_ints(u32 mask) { }
 
 static irqreturn_t armv8pmu_handle_irq(int irq_num, void *dev)
 {
-	u32 pmovsr;
+	u32 pmovsr, pintensel;
 	struct perf_sample_data data;
 	struct arm_pmu *cpu_pmu = (struct arm_pmu *)dev;
 	struct pmu_hw_events *cpuc = this_cpu_ptr(cpu_pmu->hw_events);
@@ -726,6 +735,8 @@ static irqreturn_t armv8pmu_handle_irq(int irq_num, void *dev)
 	 * Get and reset the IRQ flags
 	 */
 	pmovsr = armv8pmu_getreset_flags();
+	pintensel = armv8pmu_getinensel_val();
+	trace_printk("pmovsr : 0x%x, pintensel : 0x%x\n", pmovsr, pintensel);
 
 	/*
 	 * Did an overflow occur?
@@ -760,7 +771,7 @@ static irqreturn_t armv8pmu_handle_irq(int irq_num, void *dev)
 			continue;
 
 		if (perf_event_overflow(event, &data, regs)) {
-			cpu_pmu->disable(event);
+ 			cpu_pmu->disable(event);
 
 			/*
 			 * Update the list of interrupts

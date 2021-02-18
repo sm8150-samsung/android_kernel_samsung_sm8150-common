@@ -16,6 +16,10 @@
 #include "cam_actuator_core.h"
 #include "cam_trace.h"
 
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
+struct cam_actuator_ctrl_t *g_a_ctrls[2];
+#endif
+
 static long cam_actuator_subdev_ioctl(struct v4l2_subdev *sd,
 	unsigned int cmd, void *arg)
 {
@@ -146,12 +150,6 @@ static int32_t cam_actuator_driver_i2c_probe(struct i2c_client *client,
 	struct cam_hw_soc_info          *soc_info = NULL;
 	struct cam_actuator_soc_private *soc_private = NULL;
 
-	if (client == NULL || id == NULL) {
-		CAM_ERR(CAM_ACTUATOR, "Invalid Args client: %pK id: %pK",
-			client, id);
-		return -EINVAL;
-	}
-
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
 		CAM_ERR(CAM_ACTUATOR, "%s :: i2c_check_functionality failed",
 			 client->name);
@@ -217,7 +215,17 @@ static int32_t cam_actuator_driver_i2c_probe(struct i2c_client *client,
 	a_ctrl->bridge_intf.ops.apply_req =
 		cam_actuator_apply_request;
 	a_ctrl->last_flush_req = 0;
+
+	v4l2_set_subdevdata(&(a_ctrl->v4l2_dev_str.sd), a_ctrl);
+
 	a_ctrl->cam_act_state = CAM_ACTUATOR_INIT;
+
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
+	if (a_ctrl->soc_info.index == 0)
+		g_a_ctrls[0] = a_ctrl;
+	else if (a_ctrl->soc_info.index == 2)
+		g_a_ctrls[1] = a_ctrl;
+#endif
 
 	return rc;
 
@@ -243,24 +251,19 @@ static int32_t cam_actuator_platform_remove(struct platform_device *pdev)
 		return 0;
 	}
 
-	CAM_INFO(CAM_ACTUATOR, "platform remove invoked");
-	mutex_lock(&(a_ctrl->actuator_mutex));
-	cam_actuator_shutdown(a_ctrl);
-	mutex_unlock(&(a_ctrl->actuator_mutex));
-	cam_unregister_subdev(&(a_ctrl->v4l2_dev_str));
-
 	soc_private =
 		(struct cam_actuator_soc_private *)a_ctrl->soc_info.soc_private;
 	power_info = &soc_private->power_info;
 
 	kfree(a_ctrl->io_master_info.cci_client);
 	a_ctrl->io_master_info.cci_client = NULL;
+	kfree(power_info->power_setting);
+	kfree(power_info->power_down_setting);
+	power_info->power_setting = NULL;
+	power_info->power_down_setting = NULL;
 	kfree(a_ctrl->soc_info.soc_private);
-	a_ctrl->soc_info.soc_private = NULL;
 	kfree(a_ctrl->i2c_data.per_frame);
 	a_ctrl->i2c_data.per_frame = NULL;
-	v4l2_set_subdevdata(&a_ctrl->v4l2_dev_str.sd, NULL);
-	platform_set_drvdata(pdev, NULL);
 	devm_kfree(&pdev->dev, a_ctrl);
 
 	return rc;
@@ -268,6 +271,7 @@ static int32_t cam_actuator_platform_remove(struct platform_device *pdev)
 
 static int32_t cam_actuator_driver_i2c_remove(struct i2c_client *client)
 {
+	int32_t rc = 0;
 	struct cam_actuator_ctrl_t      *a_ctrl =
 		i2c_get_clientdata(client);
 	struct cam_actuator_soc_private *soc_private;
@@ -279,11 +283,6 @@ static int32_t cam_actuator_driver_i2c_remove(struct i2c_client *client)
 		return -EINVAL;
 	}
 
-	CAM_INFO(CAM_ACTUATOR, "i2c remove invoked");
-	mutex_lock(&(a_ctrl->actuator_mutex));
-	cam_actuator_shutdown(a_ctrl);
-	mutex_unlock(&(a_ctrl->actuator_mutex));
-	cam_unregister_subdev(&(a_ctrl->v4l2_dev_str));
 	soc_private =
 		(struct cam_actuator_soc_private *)a_ctrl->soc_info.soc_private;
 	power_info = &soc_private->power_info;
@@ -291,11 +290,14 @@ static int32_t cam_actuator_driver_i2c_remove(struct i2c_client *client)
 	/*Free Allocated Mem */
 	kfree(a_ctrl->i2c_data.per_frame);
 	a_ctrl->i2c_data.per_frame = NULL;
+	kfree(power_info->power_setting);
+	kfree(power_info->power_down_setting);
+	kfree(a_ctrl->soc_info.soc_private);
+	power_info->power_setting = NULL;
+	power_info->power_down_setting = NULL;
 	a_ctrl->soc_info.soc_private = NULL;
-	v4l2_set_subdevdata(&a_ctrl->v4l2_dev_str.sd, NULL);
 	kfree(a_ctrl);
-
-	return 0;
+	return rc;
 }
 
 static const struct of_device_id cam_actuator_driver_dt_match[] = {
@@ -367,6 +369,13 @@ static int32_t cam_actuator_driver_platform_probe(
 	if (rc)
 		goto free_mem;
 
+
+	if (soc_private->i2c_info.slave_addr != 0)
+		a_ctrl->io_master_info.cci_client->sid =
+			soc_private->i2c_info.slave_addr >> 1;
+	a_ctrl->io_master_info.cci_client->cci_i2c_master =
+		a_ctrl->cci_i2c_master;
+
 	a_ctrl->bridge_intf.device_hdl = -1;
 	a_ctrl->bridge_intf.link_hdl = -1;
 	a_ctrl->bridge_intf.ops.get_dev_info =
@@ -380,7 +389,15 @@ static int32_t cam_actuator_driver_platform_probe(
 	a_ctrl->last_flush_req = 0;
 
 	platform_set_drvdata(pdev, a_ctrl);
+	v4l2_set_subdevdata(&a_ctrl->v4l2_dev_str.sd, a_ctrl);
 	a_ctrl->cam_act_state = CAM_ACTUATOR_INIT;
+
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
+	if (a_ctrl->soc_info.index == 0)
+		g_a_ctrls[0] = a_ctrl;
+	else if (a_ctrl->soc_info.index == 2)
+		g_a_ctrls[1] = a_ctrl;
+#endif
 
 	return rc;
 
@@ -419,6 +436,8 @@ static struct i2c_driver cam_actuator_driver_i2c = {
 	.remove = cam_actuator_driver_i2c_remove,
 	.driver = {
 		.name = ACTUATOR_DRIVER_I2C,
+		.owner = THIS_MODULE,
+		.of_match_table = cam_actuator_driver_dt_match,
 	},
 };
 

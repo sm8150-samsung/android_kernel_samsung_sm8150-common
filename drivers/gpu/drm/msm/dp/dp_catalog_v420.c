@@ -16,6 +16,9 @@
 
 #include "dp_catalog.h"
 #include "dp_reg.h"
+#ifdef CONFIG_SEC_DISPLAYPORT
+#include "secdp.h"
+#endif
 
 #define dp_catalog_get_priv_v420(x) ({ \
 	struct dp_catalog *dp_catalog; \
@@ -26,6 +29,7 @@
 #define MAX_VOLTAGE_LEVELS 4
 #define MAX_PRE_EMP_LEVELS 4
 
+#ifndef CONFIG_SEC_DISPLAYPORT
 static u8 const vm_pre_emphasis[MAX_VOLTAGE_LEVELS][MAX_PRE_EMP_LEVELS] = {
 	{0x00, 0x0E, 0x16, 0xFF},       /* pe0, 0 db */
 	{0x00, 0x0E, 0x16, 0xFF},       /* pe1, 3.5 db */
@@ -40,6 +44,39 @@ static u8 const vm_voltage_swing[MAX_VOLTAGE_LEVELS][MAX_PRE_EMP_LEVELS] = {
 	{0x1A, 0x1F, 0xFF, 0xFF}, /* sw1, 0.8 v */
 	{0xFF, 0xFF, 0xFF, 0xFF}  /* sw1, 1.2 v, optional */
 };
+#else
+#ifdef SECDP_CALIBRATE_VXPX
+u8 vm_pre_emphasis[MAX_VOLTAGE_LEVELS][MAX_PRE_EMP_LEVELS] = {
+	{0x00, 0x0D, 0x15, 0xFF},       /* pe0, 0 db */
+	{0x00, 0x0D, 0x15, 0xFF},       /* pe1, 3.5 db */
+	{0x00, 0x0C, 0xFF, 0xFF},       /* pe2, 6.0 db */
+	{0xFF, 0xFF, 0xFF, 0xFF}        /* pe3, 9.5 db */
+};
+
+/* voltage swing, 0.2v and 1.0v are not support */
+u8 vm_voltage_swing[MAX_VOLTAGE_LEVELS][MAX_PRE_EMP_LEVELS] = {
+	{0x07, 0x0F, 0x14, 0xFF}, /* sw0, 0.4v  */
+	{0x11, 0x1D, 0x1F, 0xFF}, /* sw1, 0.6 v */
+	{0x18, 0x1F, 0xFF, 0xFF}, /* sw1, 0.8 v */
+	{0xFF, 0xFF, 0xFF, 0xFF}  /* sw1, 1.2 v, optional */
+};
+#else/* use values from sdm845 */
+static u8 const vm_pre_emphasis[MAX_VOLTAGE_LEVELS][MAX_PRE_EMP_LEVELS] = {
+	{0x00, 0x0D, 0x15, 0xFF},       /* pe0, 0 db */
+	{0x00, 0x0D, 0x15, 0xFF},       /* pe1, 3.5 db */
+	{0x00, 0x0C, 0xFF, 0xFF},       /* pe2, 6.0 db */
+	{0xFF, 0xFF, 0xFF, 0xFF}        /* pe3, 9.5 db */
+};
+
+/* voltage swing, 0.2v and 1.0v are not support */
+static u8 const vm_voltage_swing[MAX_VOLTAGE_LEVELS][MAX_PRE_EMP_LEVELS] = {
+	{0x07, 0x0F, 0x14, 0xFF}, /* sw0, 0.4v  */
+	{0x11, 0x1D, 0x1F, 0xFF}, /* sw1, 0.6 v */
+	{0x18, 0x1F, 0xFF, 0xFF}, /* sw1, 0.8 v */
+	{0xFF, 0xFF, 0xFF, 0xFF}  /* sw1, 1.2 v, optional */
+};
+#endif
+#endif
 
 struct dp_catalog_io {
 	struct dp_io_data *dp_ahb;
@@ -239,6 +276,21 @@ static void dp_catalog_ctrl_update_vx_px_v420(struct dp_catalog_ctrl *ctrl,
 
 	value0 = vm_voltage_swing[v_level][p_level];
 	value1 = vm_pre_emphasis[v_level][p_level];
+#ifdef SECDP_SELF_TEST
+	if (secdp_self_test_status(ST_VOLTAGE_TUN) >= 0) {
+		u8 val = secdp_self_test_get_arg(ST_VOLTAGE_TUN)[v_level*4 + p_level];
+
+		pr_info("value0 : 0x%02d => 0x%02d\n", value0, val);
+		value0 = val;
+	}
+
+	if (secdp_self_test_status(ST_PREEM_TUN) >= 0) {
+		u8 val = secdp_self_test_get_arg(ST_PREEM_TUN)[v_level*4 + p_level];
+		
+		pr_info("value0 : 0x%02d => 0x%02d\n", value1, val);
+		value1 = val;
+	}
+#endif
 
 	/* program default setting first */
 	io_data = catalog->io->dp_ln_tx0;
@@ -299,6 +351,98 @@ static void dp_catalog_ctrl_lane_pnswap_v420(struct dp_catalog_ctrl *ctrl,
 	dp_write(catalog->exe_mode, io_data, TXn_TX_POL_INV_V420, cfg1);
 }
 
+#ifdef SECDP_CALIBRATE_VXPX
+void secdp_catalog_vx_show(void)
+{
+	u8 value0, value1, value2, value3;
+	int i;
+
+	pr_debug("+++\n");
+
+	for (i = 0; i < MAX_VOLTAGE_LEVELS; i++) {
+		value0 = vm_voltage_swing[i][0];
+		value1 = vm_voltage_swing[i][1];
+		value2 = vm_voltage_swing[i][2];
+		value3 = vm_voltage_swing[i][3];
+		pr_info("%02x,%02x,%02x,%02x\n", value0, value1, value2, value3);
+	}
+}
+
+int secdp_catalog_vx_store(int *val, int size)
+{
+	int rc = 0;
+
+	pr_debug("+++\n");
+
+	vm_voltage_swing[0][0] = val[0];
+	vm_voltage_swing[0][1] = val[1];
+	vm_voltage_swing[0][2] = val[2];
+	vm_voltage_swing[0][3] = val[3];
+	
+	vm_voltage_swing[1][0] = val[4];
+	vm_voltage_swing[1][1] = val[5];
+	vm_voltage_swing[1][2] = val[6];
+	vm_voltage_swing[1][3] = val[7];
+
+	vm_voltage_swing[2][0] = val[8];
+	vm_voltage_swing[2][1] = val[9];
+	vm_voltage_swing[2][2] = val[10];
+	vm_voltage_swing[2][3] = val[11];
+
+	vm_voltage_swing[3][0] = val[12];
+	vm_voltage_swing[3][1] = val[13];
+	vm_voltage_swing[3][2] = val[14];
+	vm_voltage_swing[3][3] = val[15];
+
+	return rc;	
+}
+
+void secdp_catalog_px_show(void)
+{
+	u8 value0, value1, value2, value3;
+	int i;
+
+	pr_debug("+++\n");
+
+	for (i = 0; i < MAX_PRE_EMP_LEVELS; i++) {
+		value0 = vm_pre_emphasis[i][0];
+		value1 = vm_pre_emphasis[i][1];
+		value2 = vm_pre_emphasis[i][2];
+		value3 = vm_pre_emphasis[i][3];
+		pr_info("%02x,%02x,%02x,%02x\n", value0, value1, value2, value3);
+	}
+}
+
+int secdp_catalog_px_store(int *val, int size)
+{
+	int rc = 0;
+
+	pr_debug("+++\n");
+
+	vm_pre_emphasis[0][0] = val[0];
+	vm_pre_emphasis[0][1] = val[1];
+	vm_pre_emphasis[0][2] = val[2];
+	vm_pre_emphasis[0][3] = val[3];
+	
+	vm_pre_emphasis[1][0] = val[4];
+	vm_pre_emphasis[1][1] = val[5];
+	vm_pre_emphasis[1][2] = val[6];
+	vm_pre_emphasis[1][3] = val[7];
+
+	vm_pre_emphasis[2][0] = val[8];
+	vm_pre_emphasis[2][1] = val[9];
+	vm_pre_emphasis[2][2] = val[10];
+	vm_pre_emphasis[2][3] = val[11];
+
+	vm_pre_emphasis[3][0] = val[12];
+	vm_pre_emphasis[3][1] = val[13];
+	vm_pre_emphasis[3][2] = val[14];
+	vm_pre_emphasis[3][3] = val[15];
+
+	return rc;	
+}
+#endif
+
 static void dp_catalog_put_v420(struct dp_catalog *catalog)
 {
 	struct dp_catalog_private_v420 *catalog_priv;
@@ -331,6 +475,8 @@ int dp_catalog_get_v420(struct device *dev, struct dp_catalog *catalog,
 		pr_err("invalid input\n");
 		return -EINVAL;
 	}
+
+	pr_debug("+++\n");
 
 	catalog_priv = devm_kzalloc(dev, sizeof(*catalog_priv), GFP_KERNEL);
 	if (!catalog_priv)

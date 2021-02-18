@@ -46,6 +46,7 @@ struct binder_transaction;
  */
 struct binder_buffer {
 	struct list_head entry; /* free and allocated entries by address */
+	unsigned int dummy;
 	struct rb_node rb_node; /* free entry by size or allocated entry */
 				/* by address */
 	unsigned free:1;

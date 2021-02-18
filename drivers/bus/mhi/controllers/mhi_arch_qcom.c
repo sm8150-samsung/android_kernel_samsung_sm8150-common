@@ -28,6 +28,23 @@
 #include <linux/mhi.h>
 #include "mhi_qcom.h"
 
+#ifdef CONFIG_SEC_DEBUG_MDM_FILE_INFO
+#include <linux/sec_debug.h>
+#endif
+
+static u32 mhi_bl_session_id;
+
+static int mhi_bl_panic_handler(struct notifier_block *this,
+				unsigned long event, void *ptr)
+{
+	pr_emerg("mhi Session ID:0x%x\n", mhi_bl_session_id);
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block mhi_bl_panic_nb = {
+	.notifier_call  = mhi_bl_panic_handler,
+};
+
 struct arch_info {
 	struct mhi_dev *mhi_dev;
 	struct esoc_desc *esoc_client;
@@ -328,6 +345,12 @@ static void mhi_bl_remove(struct mhi_device *mhi_device)
 	struct mhi_dev *mhi_dev = mhi_controller_get_devdata(mhi_cntrl);
 	struct arch_info *arch_info = mhi_dev->arch_info;
 
+	atomic_notifier_chain_unregister(&panic_notifier_list, &mhi_bl_panic_nb);
+
+	ipc_log_string(arch_info->boot_ipc_log,
+			HLOG "mhi Session ID:0x%x\n", mhi_bl_session_id);
+	pr_emerg("mhi Session ID:0x%x\n", mhi_bl_session_id);
+
 	arch_info->boot_dev = NULL;
 	ipc_log_string(arch_info->boot_ipc_log,
 		       HLOG "Received Remove notif.\n");
@@ -423,6 +446,19 @@ static int mhi_bl_probe(struct mhi_device *mhi_device,
 							 node_name, 0);
 	ipc_log_string(arch_info->boot_ipc_log, HLOG
 		       "Entered SBL, Session ID:0x%x\n", mhi_cntrl->session_id);
+
+	mhi_bl_session_id = mhi_cntrl->session_id;
+	atomic_notifier_chain_register(&panic_notifier_list, &mhi_bl_panic_nb);
+
+#ifdef CONFIG_SEC_DEBUG_MDM_FILE_INFO
+{
+    char sid[128];
+
+    snprintf(sid, sizeof(sid), "%x", mhi_bl_session_id);
+    pr_info("%s: session id: %s\n", __func__, sid);
+    sec_set_mdm_summary_info(sid);
+}
+#endif
 
 	return 0;
 }

@@ -136,8 +136,8 @@ int ion_hyp_unassign_sg(struct sg_table *sgt, int *source_vm_list,
 				       &dest_vmid, &dest_perms, 1);
 	if (ret) {
 		if (!try_lock)
-			pr_err("%s: Unassign call failed.\n",
-			       __func__);
+			pr_err("%s: Unassign call failed : %d\n",
+			       __func__, ret);
 		goto out;
 	}
 	if (clear_page_private)
@@ -155,6 +155,8 @@ int ion_hyp_assign_sg(struct sg_table *sgt, int *dest_vm_list,
 	int *dest_perms;
 	int i;
 	int ret = 0;
+	int j = -1;
+	int k = -1;
 
 	if (dest_nelems <= 0) {
 		pr_err("%s: dest_nelems invalid\n",
@@ -173,16 +175,26 @@ int ion_hyp_assign_sg(struct sg_table *sgt, int *dest_vm_list,
 		if (dest_vm_list[i] == VMID_CP_SEC_DISPLAY ||
 		    dest_vm_list[i] == VMID_CP_DSP_EXT)
 			dest_perms[i] = PERM_READ;
+		else if (dest_vm_list[i] == VMID_CP_CAMERA_ENCODE) {
+			j = i;
+			dest_perms[i] = PERM_READ | PERM_WRITE;
+		} else if (dest_vm_list[i] == VMID_CP_CAMERA) {
+			k = i;
+			dest_perms[i] = PERM_READ | PERM_WRITE;
+		}
 		else
 			dest_perms[i] = PERM_READ | PERM_WRITE;
 	}
+
+	if ((j != -1) && (k != -1))
+		dest_perms[j] = PERM_READ;
 
 	ret = hyp_assign_table(sgt, &source_vmid, 1,
 			       dest_vm_list, dest_perms, dest_nelems);
 
 	if (ret) {
-		pr_err("%s: Assign call failed\n",
-		       __func__);
+		pr_err("%s: Assign call failed : %d\n",
+		       __func__, ret);
 		goto out_free_dest;
 	}
 	if (set_page_private)
@@ -203,10 +215,18 @@ int ion_hyp_unassign_sg_from_flags(struct sg_table *sgt, unsigned long flags,
 	int source_nelems;
 
 	source_nelems = count_set_bits(flags & ION_FLAGS_CP_MASK);
+	if (!source_nelems) {
+		ret = -EINVAL;
+		goto out;
+	}
+
 	source_vm_list = kcalloc(source_nelems, sizeof(*source_vm_list),
 				 GFP_KERNEL);
-	if (!source_vm_list)
-		return -ENOMEM;
+	if (!source_vm_list) {
+		ret = -ENOMEM;
+		goto out;
+	}
+
 	ret = populate_vm_list(flags, source_vm_list, source_nelems);
 	if (ret) {
 		pr_err("%s: Failed to get secure vmids\n", __func__);
@@ -218,6 +238,7 @@ int ion_hyp_unassign_sg_from_flags(struct sg_table *sgt, unsigned long flags,
 
 out_free_source:
 	kfree(source_vm_list);
+out:
 	return ret;
 }
 
@@ -229,6 +250,11 @@ int ion_hyp_assign_sg_from_flags(struct sg_table *sgt, unsigned long flags,
 	int dest_nelems;
 
 	dest_nelems = count_set_bits(flags & ION_FLAGS_CP_MASK);
+	if (!dest_nelems) {
+		ret = -EINVAL;
+		goto out;
+	}
+
 	dest_vm_list = kcalloc(dest_nelems, sizeof(*dest_vm_list), GFP_KERNEL);
 	if (!dest_vm_list) {
 		ret = -ENOMEM;

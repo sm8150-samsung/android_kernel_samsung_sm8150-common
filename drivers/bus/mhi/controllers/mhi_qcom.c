@@ -168,6 +168,7 @@ static int mhi_init_pci_dev(struct mhi_controller *mhi_cntrl)
 	pm_runtime_set_autosuspend_delay(&pci_dev->dev, MHI_RPM_SUSPEND_TMR_MS);
 	pm_runtime_use_autosuspend(&pci_dev->dev);
 	pm_suspend_ignore_children(&pci_dev->dev, true);
+	//device_disable_async_suspend(&pci_dev->dev);
 
 	/*
 	 * pci framework will increment usage count (twice) before

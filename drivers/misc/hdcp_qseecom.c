@@ -33,6 +33,10 @@
 
 #include "qseecom_kernel.h"
 
+#ifdef CONFIG_SEC_DISPLAYPORT_ENG
+#include <linux/secdp_logger.h>
+#endif
+
 #define HDCP2P2_APP_NAME      "hdcp2p2"
 #define HDCP1_APP_NAME        "hdcp1"
 #define HDCPSRM_APP_NAME      "hdcpsrm"
@@ -760,6 +764,8 @@ static int hdcp2_app_load(struct hdcp2_handle *handle)
 {
 	int rc = 0;
 
+	pr_debug("+++\n");
+
 	if (!handle) {
 		pr_err("invalid input\n");
 		rc = -EINVAL;
@@ -825,6 +831,8 @@ static int hdcp2_app_unload(struct hdcp2_handle *handle)
 	hdcp2_app_init_var(deinit);
 
 	hdcp2_app_process_cmd(deinit);
+
+	pr_debug("+++\n");
 
 	/* deallocate the resources for qseecom HDCPSRM handle */
 	rc = qseecom_shutdown_app(&handle->hdcpsrm_qseecom_handle);
@@ -1035,6 +1043,8 @@ static int hdcp2_app_start(struct hdcp2_handle *handle)
 {
 	int rc = 0;
 
+	pr_debug("+++\n");
+
 	rc = hdcp2_app_load(handle);
 	if (rc)
 		goto error;
@@ -1060,6 +1070,8 @@ error:
 static int hdcp2_app_stop(struct hdcp2_handle *handle)
 {
 	int rc = 0;
+
+	pr_debug("+++\n");
 
 	rc = hdcp2_app_tx_deinit(handle);
 	if (rc)

@@ -461,6 +461,7 @@ int msm_gem_get_iova(struct drm_gem_object *obj,
 	struct msm_gem_object *msm_obj = to_msm_bo(obj);
 	struct msm_gem_vma *vma;
 	int ret = 0;
+	dma_addr_t phys_addr;
 
 	mutex_lock(&msm_obj->lock);
 
@@ -470,11 +471,13 @@ int msm_gem_get_iova(struct drm_gem_object *obj,
 	}
 
 	vma = lookup_vma(obj, aspace);
+	if(obj->import_attach)
+		phys_addr = msm_gem_get_dma_addr(obj);
 
 	if (!vma) {
 		struct page **pages;
 		struct device *dev;
-		struct dma_buf *dmabuf;
+		struct dma_buf *dmabuf = NULL;
 		bool reattach = false;
 
 		/*
@@ -486,12 +489,13 @@ int msm_gem_get_iova(struct drm_gem_object *obj,
 		dev = msm_gem_get_aspace_device(aspace);
 		if (dev && obj->import_attach &&
 				(dev != obj->import_attach->dev)) {
+			dma_addr_t phys_addr = msm_gem_get_dma_addr(obj);
 			dmabuf = obj->import_attach->dmabuf;
 
 			DRM_DEBUG("detach nsec-dev:%pK attach sec-dev:%pK\n",
 					 obj->import_attach->dev, dev);
-			SDE_EVT32(obj->import_attach->dev, dev, msm_obj->sgt);
-
+			SDE_EVT32(obj->import_attach->dev, dev, msm_obj->sgt,
+					phys_addr, dmabuf, aspace);
 
 			if (msm_obj->sgt)
 				dma_buf_unmap_attachment(obj->import_attach,
@@ -529,6 +533,12 @@ int msm_gem_get_iova(struct drm_gem_object *obj,
 		if (IS_ERR(pages)) {
 			ret = PTR_ERR(pages);
 			goto fail;
+		}
+
+		if (obj->import_attach) {
+			dmabuf = obj->import_attach->dmabuf;
+			SDE_EVT32(obj->import_attach->dev, 0x1111, msm_obj->sgt,
+					phys_addr, dmabuf, aspace);
 		}
 
 		ret = msm_gem_map_vma(aspace, vma, msm_obj->sgt,

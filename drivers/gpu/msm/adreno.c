@@ -46,6 +46,10 @@
 #include "adreno-gpulist.h"
 #include "adreno_dispatch.h"
 
+#if defined(CONFIG_SEC_ABC)
+#include <linux/sti/abc_common.h>
+#endif
+
 #undef MODULE_PARAM_PREFIX
 #define MODULE_PARAM_PREFIX "adreno."
 
@@ -582,6 +586,9 @@ void adreno_hang_int_callback(struct adreno_device *adreno_dev, int bit)
 {
 	KGSL_DRV_CRIT_RATELIMIT(KGSL_DEVICE(adreno_dev),
 			"MISC: GPU hang detected\n");
+#if defined(CONFIG_SEC_ABC)
+	sec_abc_send_event("MODULE=gpu_qc@ERROR=gpu_fault");
+#endif
 	adreno_irqctrl(adreno_dev, 0);
 
 	/* Trigger a fault in the dispatcher - this will effect a restart */
@@ -2420,6 +2427,14 @@ int adreno_reset(struct kgsl_device *device, int fault)
 		}
 	}
 	if (ret) {
+		unsigned long flags = device->pwrctrl.ctrl_flags;
+
+		/*
+		 * Clear ctrl_flags to ensure clocks and regulators are
+		 * turned off
+		 */
+		device->pwrctrl.ctrl_flags = 0;
+
 		/* If soft reset failed/skipped, then pull the power */
 		kgsl_pwrctrl_change_state(device, KGSL_STATE_INIT);
 		/* since device is officially off now clear start bit */
@@ -2437,6 +2452,8 @@ int adreno_reset(struct kgsl_device *device, int fault)
 					break;
 			}
 		}
+
+		device->pwrctrl.ctrl_flags = flags;
 	}
 	if (ret)
 		return ret;

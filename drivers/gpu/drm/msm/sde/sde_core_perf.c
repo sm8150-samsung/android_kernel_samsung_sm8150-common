@@ -509,7 +509,21 @@ void sde_core_perf_crtc_update(struct drm_crtc *crtc,
 	old = &sde_crtc->cur_perf;
 	new = &sde_crtc->new_perf;
 
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	/* check only active crtc's request for mdp clock calculation (case 03876500, 03897887).
+	 * - Problem scenario.
+	 * 1) boot on dual display device, and turn on only main display.
+	 * So, main display crtc's bw_control = true, and sub display crtc's bw_control = false.
+	 * 2) After suspend -> resume, it save and restore whole crtcs to list.
+	 * 3) After resume, it calculate mdp clock while considering whole crtc's request.
+	 *    But, sub crtc's bw_control is false, and so, its mdp clock be set to maximum value...
+	 *    In result, it gets maximum mdp clock value due to sub crtc..
+	 * To prevent above issue, check only active crtc's request for mdp clock calculation
+	 */
+	if (_sde_core_perf_crtc_is_power_on(crtc) && !stop_req && crtc->state->active) {
+#else
 	if (_sde_core_perf_crtc_is_power_on(crtc) && !stop_req) {
+#endif
 		for (i = 0; i < SDE_POWER_HANDLE_DBUS_ID_MAX; i++) {
 			/*
 			 * cases for bus bandwidth update.

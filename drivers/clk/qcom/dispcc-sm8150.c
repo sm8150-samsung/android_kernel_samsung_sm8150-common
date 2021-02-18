@@ -232,7 +232,7 @@ static struct alpha_pll_config disp_cc_pll0_config = {
 	.config_ctl_hi1_val = 0x00000024,
 	.test_ctl_val = 0x00000000,
 	.test_ctl_hi_val = 0x00000002,
-	.test_ctl_hi1_val = 0x00000000,
+	.test_ctl_hi1_val = 0x00000020,
 	.user_ctl_val = 0x00000000,
 	.user_ctl_hi_val = 0x00000805,
 	.user_ctl_hi1_val = 0x000000D0,
@@ -244,6 +244,9 @@ static struct alpha_pll_config disp_cc_pll0_config_sm8150_v2 = {
 	.config_ctl_val = 0x20485699,
 	.config_ctl_hi_val = 0x00002267,
 	.config_ctl_hi1_val = 0x00000024,
+	.test_ctl_val = 0x00000000,
+	.test_ctl_hi_val = 0x00000000,
+	.test_ctl_hi1_val = 0x00000020,
 	.user_ctl_val = 0x00000000,
 	.user_ctl_hi_val = 0x00000805,
 	.user_ctl_hi1_val = 0x000000D0,
@@ -280,7 +283,7 @@ static struct alpha_pll_config disp_cc_pll1_config = {
 	.config_ctl_hi1_val = 0x00000024,
 	.test_ctl_val = 0x00000000,
 	.test_ctl_hi_val = 0x00000002,
-	.test_ctl_hi1_val = 0x00000000,
+	.test_ctl_hi1_val = 0x00000020,
 	.user_ctl_val = 0x00000000,
 	.user_ctl_hi_val = 0x00000805,
 	.user_ctl_hi1_val = 0x000000D0,
@@ -292,6 +295,9 @@ static struct alpha_pll_config disp_cc_pll1_config_sm8150_v2 = {
 	.config_ctl_val = 0x20485699,
 	.config_ctl_hi_val = 0x00002267,
 	.config_ctl_hi1_val = 0x00000024,
+	.test_ctl_val = 0x00000000,
+	.test_ctl_hi_val = 0x00000000,
+	.test_ctl_hi1_val = 0x00000020,
 	.user_ctl_val = 0x00000000,
 	.user_ctl_hi_val = 0x00000805,
 	.user_ctl_hi1_val = 0x000000D0,
@@ -392,6 +398,9 @@ static struct clk_rcg2 disp_cc_mdss_byte1_clk_src = {
 };
 
 static const struct freq_tbl ftbl_disp_cc_mdss_dp_aux1_clk_src[] = {
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	F(12800000, P_BI_TCXO, 1.5, 0, 0),
+#endif
 	F(19200000, P_BI_TCXO, 1, 0, 0),
 	{ }
 };
@@ -1770,6 +1779,7 @@ static int disp_cc_sm8150_probe(struct platform_device *pdev)
 
 	/* Enable clock gating for DSI and MDP clocks */
 	regmap_update_bits(regmap, DISP_CC_MISC_CMD, 0x10, 0x10);
+	regmap_update_bits(regmap, 0x20CC, 0x100000, 0x100000);
 
 	ret = qcom_cc_really_probe(pdev, &disp_cc_sm8150_desc, regmap);
 	if (ret) {
@@ -1800,6 +1810,15 @@ static void __exit disp_cc_sm8150_exit(void)
 	platform_driver_unregister(&disp_cc_sm8150_driver);
 }
 module_exit(disp_cc_sm8150_exit);
+
+void disp_cc_dump_clocks(void)
+{
+	clk_debug_print_hw(disp_cc_pll0.clkr.hw.core, NULL);
+	clk_debug_print_hw(disp_cc_pll1.clkr.hw.core, NULL);
+	clk_debug_print_hw(disp_cc_mdss_ahb_clk_src.clkr.hw.core, NULL);
+	clk_debug_print_hw(disp_cc_mdss_mdp_clk_src.clkr.hw.core, NULL);
+}
+EXPORT_SYMBOL(disp_cc_dump_clocks);
 
 MODULE_DESCRIPTION("QTI DISP_CC SM8150 Driver");
 MODULE_LICENSE("GPL v2");

@@ -1570,6 +1570,8 @@ static int _sde_crtc_check_planes_within_crtc_roi(struct drm_crtc *crtc,
 		plane_roi.y = pstate->crtc_y;
 		plane_roi.w = pstate->crtc_w;
 		plane_roi.h = pstate->crtc_h;
+		SDE_EVT32(pstate, ((unsigned long long)pstate) >> 32, state,
+			((unsigned long long)state) >> 32, pstate->crtc_w, pstate->crtc_h, crtc_roi->w, crtc_roi->h);
 		sde_kms_rect_intersect(crtc_roi, &plane_roi, &intersection);
 		if (!sde_kms_rect_is_equal(&plane_roi, &intersection)) {
 			SDE_ERROR(
@@ -3081,6 +3083,12 @@ static void _sde_crtc_set_input_fence_timeout(struct sde_crtc_state *cstate)
 	cstate->input_fence_timeout_ns =
 		sde_crtc_get_property(cstate, CRTC_PROP_INPUT_FENCE_TIMEOUT);
 	cstate->input_fence_timeout_ns *= NSEC_PER_MSEC;
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	/* Increase fence timeout value to 20 sec (case 03381402 / P180412-02009) */
+	cstate->input_fence_timeout_ns *= 2;
+	SDE_DEBUG("input_fence_timeout_ns %llu \n ", cstate->input_fence_timeout_ns);
+#endif
 }
 
 /**
@@ -4793,6 +4801,9 @@ static void sde_crtc_disable(struct drm_crtc *crtc)
 	u32 power_on;
 	bool in_cont_splash = false;
 	int ret, i;
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	int blank;
+#endif
 
 	if (!crtc || !crtc->dev || !crtc->dev->dev_private || !crtc->state) {
 		SDE_ERROR("invalid crtc\n");
@@ -4878,7 +4889,6 @@ static void sde_crtc_disable(struct drm_crtc *crtc)
 					sde_crtc->name, node->event);
 	}
 	spin_unlock_irqrestore(&sde_crtc->spin_lock, flags);
-
 	drm_for_each_encoder(encoder, crtc->dev) {
 		if (encoder->crtc != crtc)
 			continue;
@@ -4934,6 +4944,13 @@ static void sde_crtc_disable(struct drm_crtc *crtc)
 	cstate->bw_split_vote = false;
 
 	mutex_unlock(&sde_crtc->crtc_lock);
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	/* notify registered clients about suspend event */
+	blank = FB_BLANK_POWERDOWN;
+	__msm_drm_notifier_call_chain(FB_EVENT_BLANK, &blank);
+#endif
+
 }
 
 static void sde_crtc_enable(struct drm_crtc *crtc,
@@ -4948,6 +4965,9 @@ static void sde_crtc_enable(struct drm_crtc *crtc,
 	u32 power_on;
 	int ret, i;
 	struct sde_crtc_state *cstate;
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	int blank;
+#endif
 
 	if (!crtc || !crtc->dev || !crtc->dev->dev_private) {
 		SDE_ERROR("invalid crtc\n");
@@ -5029,6 +5049,12 @@ static void sde_crtc_enable(struct drm_crtc *crtc,
 	/* Enable ESD thread */
 	for (i = 0; i < cstate->num_connectors; i++)
 		sde_connector_schedule_status_work(cstate->connectors[i], true);
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	/* notify registered clients about resume event */
+	blank = FB_BLANK_UNBLANK;
+	__msm_drm_notifier_call_chain(FB_EVENT_BLANK, &blank);
+#endif
 }
 
 /* no input validation - caller API has all the checks */

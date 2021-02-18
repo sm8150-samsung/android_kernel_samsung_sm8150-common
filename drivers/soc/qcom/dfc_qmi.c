@@ -14,6 +14,9 @@
 #include <net/pkt_sched.h>
 #include <soc/qcom/rmnet_qmi.h>
 #include <soc/qcom/qmi_rmnet.h>
+#include <linux/netlog.h>
+#include <linux/delay.h>
+
 #include "dfc_defs.h"
 
 #define CREATE_TRACE_POINTS
@@ -689,6 +692,8 @@ static struct qmi_elem_info dfc_tx_link_status_ind_v01_ei[] = {
 	},
 };
 
+#define RETRY_CNT				(20)
+#define QMI_ERR_INVALID_ARG_V01	(0x0030)
 static int
 dfc_bind_client_req(struct qmi_handle *dfc_handle,
 		    struct sockaddr_qrtr *ssctl, struct svc_info *svc)
@@ -738,6 +743,9 @@ dfc_bind_client_req(struct qmi_handle *dfc_handle,
 		pr_err("%s() Request rejected, result: %d, err: %d\n",
 			__func__, resp->resp.result, resp->resp.error);
 		ret = -resp->resp.result;
+		if (ret == -QMI_RESULT_FAILURE_V01 
+			&& resp->resp.error == QMI_ERR_INVALID_ARG_V01)
+			ret = resp->resp.error;
 	}
 
 out:
@@ -862,10 +870,19 @@ out:
 static int dfc_init_service(struct dfc_qmi_data *data)
 {
 	int rc;
+	int cnt = RETRY_CNT;
 
 	rc = dfc_bind_client_req(&data->handle, &data->ssctl, &data->svc);
-	if (rc < 0)
+	while (rc == QMI_ERR_INVALID_ARG_V01 && --cnt) {
+		mdelay(20);
+		net_log("%s() dfc_bind_client_req() tried: %d\n", __func__, RETRY_CNT - cnt);
+		rc = dfc_bind_client_req(&data->handle, &data->ssctl, &data->svc);
+	}
+
+	if (rc < 0) {
+		net_log("%s() dfc_bind_client_req() failed: %d, %d\n", __func__, RETRY_CNT - cnt, rc);
 		return rc;
+	}
 
 	return dfc_indication_register_req(&data->handle, &data->ssctl, 1);
 }
@@ -1062,10 +1079,14 @@ static int dfc_update_fc_map(struct net_device *dev, struct qos_info *qos,
 		itm->last_seq = fc_info->seq_num;
 		itm->last_adjusted_grant = adjusted_grant;
 
-		if (action)
+		if (action) {
+			net_log("I> m=%d b=%d gr=%d s=%d a=%d\n",
+				fc_info->mux_id, fc_info->bearer_id,
+				fc_info->num_bytes, fc_info->seq_num,
+				ancillary);
 			rc = dfc_bearer_flow_ctl(dev, itm, qos);
 	}
-
+}
 	return rc;
 }
 
@@ -1122,10 +1143,14 @@ void dfc_do_burst_flow_control(struct dfc_qmi_data *dfc,
 			continue;
 		}
 
-		if (unlikely(flow_status->bearer_id == 0xFF))
+		if (unlikely(flow_status->bearer_id == 0xFF)) {
+			net_log("I> m=%d b=%d gr=%d s=%d a=%d\n",
+				flow_status->mux_id, flow_status->bearer_id,
+				flow_status->num_bytes, flow_status->seq_num,
+				ancillary);			
 			dfc_all_bearer_flow_ctl(
 				dev, qos, ack_req, ancillary, flow_status);
-		else
+		} else
 			dfc_update_fc_map(
 				dev, qos, ack_req, ancillary, flow_status,
 				is_query, dfc->index);
@@ -1150,6 +1175,9 @@ static void dfc_update_tx_link_status(struct net_device *dev,
 
 	itm->tx_status_index = index;
 
+	net_log("Link> %s, b=%d, gr=%d, rs=%d, status %d\n", dev->name,
+		binfo->bearer_id, itm->grant_size, itm->rat_switch, tx_status);
+		
 	/* If no change in tx status, ignore */
 	if (itm->tx_off == !tx_status)
 		return;

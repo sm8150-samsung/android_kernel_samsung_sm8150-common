@@ -25,9 +25,17 @@
 #include <net/sock.h>
 #include <uapi/linux/sched/types.h>
 
+#include <soc/qcom/subsystem_restart.h>
+
 #include "qrtr.h"
 
-#define QRTR_LOG_PAGE_CNT 4
+#ifdef CONFIG_DEBUG_FS
+#include <linux/debugfs.h>
+
+static void qrtr_debugfs_init(void);
+#endif
+
+#define QRTR_LOG_PAGE_CNT 50
 #define QRTR_INFO(ctx, x, ...)				\
 	ipc_log_string(ctx, x, ##__VA_ARGS__)
 
@@ -124,6 +132,10 @@ static inline struct qrtr_sock *qrtr_sk(struct sock *sk)
 
 static unsigned int qrtr_local_nid = CONFIG_QRTR_NODE_ID;
 
+/* qrtr ipc logging context reference */
+static void *qrtr_ilc;
+static void *qrtr_ilc_tx;
+
 /* for node ids */
 static RADIX_TREE(qrtr_nodes, GFP_KERNEL);
 /* broadcast list */
@@ -134,6 +146,15 @@ static DECLARE_RWSEM(qrtr_node_lock);
 /* local port allocation management */
 static DEFINE_IDR(qrtr_ports);
 static DEFINE_MUTEX(qrtr_port_lock);
+
+/* backup buffers */
+#define QRTR_BACKUP_HI_NUM	5
+#define QRTR_BACKUP_HI_SIZE	SZ_16K
+#define QRTR_BACKUP_LO_NUM	20
+#define QRTR_BACKUP_LO_SIZE	SZ_1K
+static struct sk_buff_head qrtr_backup_lo;
+static struct sk_buff_head qrtr_backup_hi;
+static struct work_struct qrtr_backup_work;
 
 /**
  * struct qrtr_node - endpoint node
@@ -184,11 +205,15 @@ struct qrtr_node {
 struct qrtr_tx_flow_waiter {
 	struct list_head node;
 	struct sock *sk;
+	u64 start_ns;
 };
 
 struct qrtr_tx_flow {
 	atomic_t pending;
 	struct list_head waiters;
+	u64 last_ns;
+	char taskname[TASK_COMM_LEN];
+	pid_t pid;
 };
 
 #define QRTR_TX_FLOW_HIGH	10
@@ -286,11 +311,17 @@ static void qrtr_log_rx_msg(struct qrtr_node *node, struct sk_buff *skb)
 				  le32_to_cpu(pkt.server.node),
 				  le32_to_cpu(pkt.server.port));
 		else if (cb->type == QRTR_TYPE_DEL_CLIENT ||
-			 cb->type == QRTR_TYPE_RESUME_TX)
+			 cb->type == QRTR_TYPE_RESUME_TX) {
 			QRTR_INFO(node->ilc,
 				  "RX CTRL: cmd:0x%x addr[0x%x:0x%x]\n",
 				  cb->type, le32_to_cpu(pkt.client.node),
 				  le32_to_cpu(pkt.client.port));
+			if (le32_to_cpu(pkt.client.node == 0x0))
+				QRTR_INFO(qrtr_ilc_tx,
+				  "RX: cmd:0x%x addr[0x%x:0x%x]\n",
+				  cb->type, le32_to_cpu(pkt.client.node),
+				  le32_to_cpu(pkt.client.port));
+		}
 		else if (cb->type == QRTR_TYPE_HELLO ||
 			 cb->type == QRTR_TYPE_BYE) {
 			QRTR_INFO(node->ilc,
@@ -488,6 +519,9 @@ static int qrtr_tx_wait(struct qrtr_node *node, struct sockaddr_qrtr *to,
 			atomic_inc(&flow->pending);
 			confirm_rx = atomic_read(&flow->pending) ==
 				     QRTR_TX_FLOW_LOW;
+			flow->last_ns = sched_clock();
+			snprintf(flow->taskname, TASK_COMM_LEN, "%s", current->comm);
+			flow->pid = current->pid;
 			mutex_unlock(&node->qrtr_tx_lock);
 			break;
 		}
@@ -498,6 +532,7 @@ static int qrtr_tx_wait(struct qrtr_node *node, struct sockaddr_qrtr *to,
 				return -ENOMEM;
 			}
 			waiter->sk = sk;
+			waiter->start_ns = sched_clock();
 			sock_hold(sk);
 			list_add_tail(&waiter->node, &flow->waiters);
 			mutex_unlock(&node->qrtr_tx_lock);
@@ -571,6 +606,16 @@ static int qrtr_node_enqueue(struct qrtr_node *node, struct sk_buff *skb,
 		       len, ALIGN(len, 4) + sizeof(*hdr), rc);
 		return rc;
 	}
+
+	// not kworker, ap to modem
+	if (hdr->src_node_id == 0x1 && hdr->dst_node_id == 0x0 &&
+					strncmp(current->comm, "kwork", 5))
+		QRTR_INFO(qrtr_ilc_tx,
+		  "[%s]W: Len:0x%x CF:0x%x src[0x%x:0x%x] dst[0x%x:0x%x]\n",
+			  current->comm,
+			  hdr->size, hdr->confirm_rx,
+			  hdr->src_node_id, hdr->src_port_id,
+			  hdr->dst_node_id, hdr->dst_port_id);
 
 	mutex_lock(&node->ep_lock);
 	if (node->ep)
@@ -694,6 +739,59 @@ int qrtr_peek_pkt_size(const void *data)
 }
 EXPORT_SYMBOL(qrtr_peek_pkt_size);
 
+static void qrtr_alloc_backup(struct work_struct *work)
+{
+	struct sk_buff *skb;
+	int errcode;
+
+	while (skb_queue_len(&qrtr_backup_lo) < QRTR_BACKUP_LO_NUM) {
+		skb = alloc_skb_with_frags(sizeof(struct qrtr_hdr_v1),
+				QRTR_BACKUP_LO_SIZE, 0, &errcode,
+				GFP_KERNEL);
+		if (!skb)
+			break;
+		skb_queue_tail(&qrtr_backup_lo, skb);
+	}
+	while (skb_queue_len(&qrtr_backup_hi) < QRTR_BACKUP_HI_NUM) {
+		skb = alloc_skb_with_frags(sizeof(struct qrtr_hdr_v1),
+				QRTR_BACKUP_HI_SIZE, 0, &errcode,
+				GFP_KERNEL);
+		if (!skb)
+			break;
+		skb_queue_tail(&qrtr_backup_hi, skb);
+	}
+}
+
+static struct sk_buff *qrtr_get_backup(size_t len)
+{
+	struct sk_buff *skb = NULL;
+
+	if (len < QRTR_BACKUP_LO_SIZE)
+		skb = skb_dequeue(&qrtr_backup_lo);
+	else if (len < QRTR_BACKUP_HI_SIZE)
+		skb = skb_dequeue(&qrtr_backup_hi);
+
+	if (skb)
+		queue_work(system_unbound_wq, &qrtr_backup_work);
+
+	return skb;
+}
+
+static void qrtr_backup_init(void)
+{
+	skb_queue_head_init(&qrtr_backup_lo);
+	skb_queue_head_init(&qrtr_backup_hi);
+	INIT_WORK(&qrtr_backup_work, qrtr_alloc_backup);
+	queue_work(system_unbound_wq, &qrtr_backup_work);
+}
+
+static void qrtr_backup_deinit(void)
+{
+	cancel_work_sync(&qrtr_backup_work);
+	skb_queue_purge(&qrtr_backup_lo);
+	skb_queue_purge(&qrtr_backup_hi);
+}
+
 /**
  * qrtr_endpoint_post() - post incoming data
  * @ep: endpoint handle
@@ -718,8 +816,13 @@ int qrtr_endpoint_post(struct qrtr_endpoint *ep, const void *data, size_t len)
 		return -EINVAL;
 
 	skb = alloc_skb_with_frags(sizeof(*v1), len, 0, &errcode, GFP_ATOMIC);
-	if (!skb)
-		return -ENOMEM;
+	if (!skb) {
+		skb = qrtr_get_backup(len);
+		if (!skb) {
+			pr_err("qrtr: Unable to get skb with len:%lu\n", len);
+			return -ENOMEM;
+		}
+	}
 
 	skb_reserve(skb, sizeof(*v1));
 	cb = (struct qrtr_cb *)skb->cb;
@@ -1485,7 +1588,7 @@ static int qrtr_bcast_enqueue(struct qrtr_node *node, struct sk_buff *skb,
 	}
 	up_read(&qrtr_node_lock);
 
-	qrtr_local_enqueue(node, skb, type, from, to, flags);
+	qrtr_local_enqueue(NULL, skb, type, from, to, flags);
 
 	return 0;
 }
@@ -1686,6 +1789,13 @@ static int qrtr_recvmsg(struct socket *sock, struct msghdr *msg,
 		msg->msg_namelen = sizeof(*addr);
 	}
 
+	// not kworker, modem to ap
+	if (cb->src_node == 0x0 && cb->dst_node == 0x1 && strncmp(current->comm, "kwork", 5))
+		QRTR_INFO(qrtr_ilc,
+		  "[%s]R: Len:0x%x CF:0x%x src[0x%x:0x%x] dst[0x%x:0x%x]\n",
+			  current->comm, skb->len, cb->confirm_rx, cb->src_node,
+			  cb->src_port, cb->dst_node, cb->dst_port);
+
 out:
 	if (cb->confirm_rx)
 		qrtr_resume_tx(cb);
@@ -1766,6 +1876,8 @@ static int qrtr_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 	long len = 0;
 	int rc = 0;
 
+	struct msm_ipc_subsys_request subsys_req;
+
 	lock_sock(sk);
 
 	switch (cmd) {
@@ -1807,6 +1919,20 @@ static int qrtr_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 	case SIOCGIFNETMASK:
 	case SIOCSIFNETMASK:
 		rc = -EINVAL;
+		break;
+	case IPC_SUB_IOCTL_SUBSYS_GET_RESTART:
+		rc = copy_from_user(&subsys_req, (void *)arg, sizeof(subsys_req));
+		if (rc) {
+			rc = -EFAULT;
+			break;
+		}
+
+		if (subsys_req.request_id == SUBSYS_RES_REQ)
+			subsys_force_stop((const char *)(subsys_req.name), true);
+		else if (subsys_req.request_id == SUBSYS_CR_REQ)
+			subsys_force_stop((const char *)(subsys_req.name), false);
+		else
+			rc = -EINVAL;
 		break;
 	default:
 		rc = -ENOIOCTLCMD;
@@ -1950,18 +2076,135 @@ static int __init qrtr_proto_init(void)
 	}
 
 	rtnl_register(PF_QIPCRTR, RTM_NEWADDR, qrtr_addr_doit, NULL, 0);
+	qrtr_backup_init();
+	
+	qrtr_ilc = ipc_log_context_create(QRTR_LOG_PAGE_CNT, "qrtr", 0);
+	qrtr_ilc_tx = ipc_log_context_create(QRTR_LOG_PAGE_CNT, "qrtr_0_tx", 0);
 
+#ifdef CONFIG_DEBUG_FS
+	qrtr_debugfs_init();
+#endif
 	return 0;
+
 }
 postcore_initcall(qrtr_proto_init);
 
 static void __exit qrtr_proto_fini(void)
 {
+	if (qrtr_ilc)
+		ipc_log_context_destroy(qrtr_ilc);
+	if (qrtr_ilc_tx)
+		ipc_log_context_destroy(qrtr_ilc_tx);
 	rtnl_unregister(PF_QIPCRTR, RTM_NEWADDR);
 	sock_unregister(qrtr_family.family);
 	proto_unregister(&qrtr_proto);
+
+	qrtr_backup_deinit();
 }
 module_exit(qrtr_proto_fini);
 
 MODULE_DESCRIPTION("Qualcomm IPC-router driver");
 MODULE_LICENSE("GPL v2");
+
+#ifdef CONFIG_DEBUG_FS
+static struct dentry *dent;
+
+static ssize_t qrtr_read_txflow(struct file *file, char __user *ubuf,
+		size_t count, loff_t *ppos) {
+
+	struct qrtr_node *node;
+	struct qrtr_tx_flow_waiter *waiter;
+	struct qrtr_tx_flow_waiter *temp;
+	struct qrtr_tx_flow *flow;
+	struct qrtr_sock *ipc;
+	char *buf;
+	u32 pos = 0;
+	int confirm_rx;
+	int flow_idx = 0;
+	struct radix_tree_iter iter;
+	void __rcu **slot;
+	u64 t_ns, nanosec_rem;
+	int ret;
+
+	buf = kzalloc(count, GFP_KERNEL);
+	if (buf == NULL)
+		return 0;
+
+	down_read(&qrtr_node_lock);
+	list_for_each_entry(node, &qrtr_all_epts, item) {
+		if (node->nid == QRTR_EP_NID_AUTO)
+			continue;
+		pos += scnprintf(buf + pos, count - pos, "node [%d]\n",
+								node->nid);
+
+		mutex_lock(&node->qrtr_tx_lock);
+		radix_tree_for_each_slot(slot, &node->qrtr_tx_flow, &iter, 0) {
+			flow = *slot;
+			t_ns = flow->last_ns;
+			nanosec_rem = do_div(t_ns, 1000000000U);
+			confirm_rx =
+				atomic_read(&flow->pending) == QRTR_TX_FLOW_LOW;
+			pos += scnprintf(buf + pos, count - pos,
+					 "flow %03d: pending = %d, CF = %d, "
+					 "last sent = [%6u.%09lu] "
+					 "comm = %s[%d]\n",
+					 flow_idx, atomic_read(&flow->pending),
+					 confirm_rx,
+					 (unsigned int)t_ns, nanosec_rem,
+					 flow->taskname, flow->pid);
+
+			list_for_each_entry_safe(waiter,
+						 temp, &flow->waiters, node) {
+				ipc = qrtr_sk(waiter->sk);
+				t_ns = waiter->start_ns;
+				nanosec_rem = do_div(t_ns, 1000000000U);
+				pos += scnprintf(buf + pos, count - pos,
+						 "---->> waiter : "
+						 "u[0x%x:0x%x], p[0x%x:0x%x] "
+						 "wait start = [%6u.%09lu]\n",
+						 ipc->us.sq_node,
+						 ipc->us.sq_port,
+						 ipc->peer.sq_node,
+						 ipc->peer.sq_port,
+						 (unsigned int)t_ns,
+						 nanosec_rem);
+			}
+
+			flow_idx++;
+		}
+		mutex_unlock(&node->qrtr_tx_lock);
+	}
+	up_read(&qrtr_node_lock);
+
+	ret = simple_read_from_buffer(ubuf, count, ppos, buf, pos);
+
+	kfree(buf);
+	return ret;
+}
+
+static struct file_operations txflow_fops = {
+	.read = qrtr_read_txflow,
+};
+
+static void qrtr_debugfs_init(void)
+{
+	struct dentry *file;
+
+	dent = debugfs_create_dir("qrtr", 0);
+	if (IS_ERR(dent)) {
+		QRTR_INFO(qrtr_ilc, "fail to create folder in debug_fs.\n");
+		return;
+	}
+
+	file = debugfs_create_file("txflow", 0444, dent, NULL, &txflow_fops);
+	if (!file || IS_ERR(file)) {
+		QRTR_INFO(qrtr_ilc, "fail to create file for debug_fs\n");
+		goto fail;
+	}
+
+	return;
+fail:
+	debugfs_remove_recursive(dent);
+
+}
+#endif

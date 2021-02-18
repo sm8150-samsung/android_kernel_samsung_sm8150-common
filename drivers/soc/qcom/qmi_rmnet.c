@@ -17,6 +17,7 @@
 #include <linux/rtnetlink.h>
 #include <uapi/linux/rtnetlink.h>
 #include <net/pkt_sched.h>
+#include <net/tcp.h>
 #include "qmi_rmnet_i.h"
 #include <trace/events/dfc.h>
 #include <linux/module.h>
@@ -24,6 +25,8 @@
 #include <linux/ip.h>
 #include <linux/ipv6.h>
 #include <linux/alarmtimer.h>
+#include <linux/netlog.h>
+#include <linux/rtc.h>
 
 #define NLMSG_FLOW_ACTIVATE 1
 #define NLMSG_FLOW_DEACTIVATE 2
@@ -203,14 +206,23 @@ static void qmi_rmnet_update_flow_map(struct rmnet_flow_map *itm,
 int qmi_rmnet_flow_control(struct net_device *dev, u32 mq_idx, int enable)
 {
 	struct netdev_queue *q;
-
+	struct timespec ts;
+	struct rtc_time tm;
+	
 	if (unlikely(mq_idx >= dev->num_tx_queues))
 		return 0;
 
 	q = netdev_get_tx_queue(dev, mq_idx);
 	if (unlikely(!q))
 		return 0;
-
+	
+	getnstimeofday(&ts);
+	rtc_time_to_tm(ts.tv_sec, &tm);
+	net_log("%d-%02d-%02d %02d:%02d:%02d.%06lu, %s[%d] %s_queue\n", 
+				tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+				tm.tm_hour, tm.tm_min, tm.tm_sec, ts.tv_nsec/1000,
+				dev->name, mq_idx, enable ? "wake" : "stop");
+				
 	if (enable)
 		netif_tx_wake_queue(q);
 	else
@@ -459,7 +471,10 @@ static int qmi_rmnet_add_flow(struct net_device *dev, struct tcmsg *tcm,
 	new_map.mq_idx = tcm->tcm_handle;
 	trace_dfc_flow_info(dev->name, new_map.bearer_id, new_map.flow_id,
 			    new_map.ip_type, new_map.mq_idx, 1);
-
+	net_log("add flow: %s m=%d b=%d f=%d ip=%d q=%d\n",
+			dev->name, qos_info->mux_id, new_map.bearer_id,
+			new_map.flow_id,
+			new_map.ip_type, new_map.mq_idx);
 again:
 	spin_lock_bh(&qos_info->qos_lock);
 
@@ -540,7 +555,10 @@ qmi_rmnet_del_flow(struct net_device *dev, struct tcmsg *tcm,
 		trace_dfc_flow_info(dev->name, new_map.bearer_id,
 				    new_map.flow_id, new_map.ip_type,
 				    itm->mq_idx, 0);
-
+		net_log("delete flow: %s m=%d b=%d f=%d ip=%d q=%d\n",
+			dev->name, qos_info->mux_id, new_map.bearer_id,
+			new_map.flow_id,
+			new_map.ip_type, itm->mq_idx);
 		__qmi_rmnet_bearer_put(dev, qos_info, itm->bearer, true);
 
 		/* Remove from flow map */
@@ -548,8 +566,11 @@ qmi_rmnet_del_flow(struct net_device *dev, struct tcmsg *tcm,
 		kfree(itm);
 	}
 
-	if (list_empty(&qos_info->flow_head))
+	if (list_empty(&qos_info->flow_head)) {
 		netif_tx_wake_all_queues(dev);
+		net_log("no action: %s m=%d b=%u gr=%u f=%u q=%d en",
+			dev->name, qos_info->mux_id, 0xff, DEFAULT_GRANT, 0, 0);
+	}
 
 	spin_unlock_bh(&qos_info->qos_lock);
 
@@ -891,16 +912,14 @@ void qmi_rmnet_burst_fc_check(struct net_device *dev,
 }
 EXPORT_SYMBOL(qmi_rmnet_burst_fc_check);
 
-static bool qmi_rmnet_is_tcp_ack(struct sk_buff *skb)
+static bool _qmi_rmnet_is_tcp_ack(struct sk_buff *skb)
 {
-	unsigned int len = skb->len;
-
 	switch (skb->protocol) {
 	/* TCPv4 ACKs */
 	case htons(ETH_P_IP):
 		if ((ip_hdr(skb)->protocol == IPPROTO_TCP) &&
-		    (ip_hdr(skb)->ihl == 5) &&
-		    (len == 40 || len == 52) &&
+		    (ntohs(ip_hdr(skb)->tot_len) - (ip_hdr(skb)->ihl << 2) ==
+		      tcp_hdr(skb)->doff << 2) &&
 		    ((tcp_flag_word(tcp_hdr(skb)) &
 		      cpu_to_be32(0x00FF0000)) == TCP_FLAG_ACK))
 			return true;
@@ -909,12 +928,26 @@ static bool qmi_rmnet_is_tcp_ack(struct sk_buff *skb)
 	/* TCPv6 ACKs */
 	case htons(ETH_P_IPV6):
 		if ((ipv6_hdr(skb)->nexthdr == IPPROTO_TCP) &&
-		    (len == 60 || len == 72) &&
+		    (ntohs(ipv6_hdr(skb)->payload_len) ==
+		      (tcp_hdr(skb)->doff) << 2) &&
 		    ((tcp_flag_word(tcp_hdr(skb)) &
 		      cpu_to_be32(0x00FF0000)) == TCP_FLAG_ACK))
 			return true;
 		break;
 	}
+
+	return false;
+}
+
+static inline bool qmi_rmnet_is_tcp_ack(struct sk_buff *skb)
+{
+	/* Locally generated TCP acks */
+	if (skb_is_tcp_pure_ack(skb))
+		return true;
+
+	/* Forwarded */
+	if (unlikely(_qmi_rmnet_is_tcp_ack(skb)))
+		return true;
 
 	return false;
 }

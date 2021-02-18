@@ -17,6 +17,10 @@ cros_ec_core-$(CONFIG_ACPI)	+= cros_ec_acpi_gpe.o
 obj-$(CONFIG_MFD_CROS_EC)	+= cros_ec_core.o
 obj-$(CONFIG_MFD_CROS_EC_I2C)	+= cros_ec_i2c.o
 obj-$(CONFIG_MFD_CROS_EC_SPI)	+= cros_ec_spi.o
+obj-$(CONFIG_MFD_CS35L41)	+= cs35l41-core.o cs35l41-tables.o cs35l41-cal.o cs35l41-bd.o cs35l41-pwr.o cirrus-cal.o cirrus-bd.o cirrus-amp.o cirrus-pwr.o
+obj-$(CONFIG_MFD_CS35L41_SPI)	+= cs35l41-spi.o
+obj-$(CONFIG_MFD_CS35L41_I2C)	+= cs35l41-i2c.o
+
 obj-$(CONFIG_MFD_EXYNOS_LPASS)	+= exynos-lpass.o
 
 rtsx_pci-objs			:= rtsx_pcr.o rts5209.o rts5229.o rtl8411.o rts5227.o rts5249.o
@@ -42,6 +46,21 @@ obj-$(CONFIG_MFD_TC3589X)	+= tc3589x.o
 obj-$(CONFIG_MFD_T7L66XB)	+= t7l66xb.o tmio_core.o
 obj-$(CONFIG_MFD_TC6387XB)	+= tc6387xb.o tmio_core.o
 obj-$(CONFIG_MFD_TC6393XB)	+= tc6393xb.o tmio_core.o
+
+obj-$(CONFIG_MFD_TACNA)		+= tacna-core.o
+ifeq ($(CONFIG_MFD_CS47L96),y)
+obj-$(CONFIG_MFD_TACNA)		+= cs47l96-tables.o
+endif
+ifeq ($(CONFIG_MFD_CS48L31),y)
+obj-$(CONFIG_MFD_TACNA)		+= cs48l32-tables.o
+endif
+ifeq ($(CONFIG_MFD_CS48L32),y)
+obj-$(CONFIG_MFD_TACNA)		+= cs48l32-tables.o
+endif
+ifeq ($(CONFIG_MFD_CS48L33),y)
+obj-$(CONFIG_MFD_TACNA)		+= cs48l32-tables.o
+endif
+obj-$(CONFIG_MFD_TACNA_SPI)	+= tacna-spi.o
 
 obj-$(CONFIG_MFD_ARIZONA)	+= arizona-core.o
 obj-$(CONFIG_MFD_ARIZONA)	+= arizona-irq.o
@@ -145,11 +164,13 @@ obj-$(CONFIG_MFD_MAX77620)	+= max77620.o
 obj-$(CONFIG_MFD_MAX77686)	+= max77686.o
 obj-$(CONFIG_MFD_MAX77693)	+= max77693.o
 obj-$(CONFIG_MFD_MAX77843)	+= max77843.o
+obj-$(CONFIG_MFD_MAX77705) 	+= max77705.o max77705-irq.o
 obj-$(CONFIG_MFD_MAX8907)	+= max8907.o
 max8925-objs			:= max8925-core.o max8925-i2c.o
 obj-$(CONFIG_MFD_MAX8925)	+= max8925.o
 obj-$(CONFIG_MFD_MAX8997)	+= max8997.o max8997-irq.o
 obj-$(CONFIG_MFD_MAX8998)	+= max8998.o max8998-irq.o
+obj-$(CONFIG_MFD_SM5705)	+= sm5705.o sm5705-irq.o
 
 pcf50633-objs			:= pcf50633-core.o pcf50633-irq.o
 obj-$(CONFIG_MFD_PCF50633)	+= pcf50633.o
@@ -228,3 +249,9 @@ obj-$(CONFIG_MFD_SUN4I_GPADC)	+= sun4i-gpadc.o
 obj-$(CONFIG_MFD_STM32_LPTIMER)	+= stm32-lptimer.o
 obj-$(CONFIG_MFD_STM32_TIMERS) 	+= stm32-timers.o
 obj-$(CONFIG_MFD_MXS_LRADC)     += mxs-lradc.o
+
+obj-$(CONFIG_MFD_S2MPB02)       += s2mpb02-core.o s2mpb02-irq.o
+obj-$(CONFIG_SEC_PM)	+= sec_ap_pmic.o
+
+obj-$(CONFIG_MFD_S2MU107)	+= s2mu107_core.o s2mu107_irq.o
+obj-$(CONFIG_MFD_S2MU106)	+= s2mu106_core.o s2mu106_irq.o

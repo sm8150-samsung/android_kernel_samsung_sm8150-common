@@ -46,6 +46,8 @@
 
 #include "peripheral-loader.h"
 
+#include <linux/sec_debug.h>
+
 #define pil_err(desc, fmt, ...)						\
 	dev_err(desc->dev, "%s: " fmt, desc->name, ##__VA_ARGS__)
 #define pil_info(desc, fmt, ...)					\
@@ -1250,6 +1252,20 @@ out:
 	return ret;
 }
 
+static bool disable_cpboot = 0;
+
+static int __init get_cpboot_status(char *str)
+{
+	if(!strncmp(str,"disable",7))
+        	disable_cpboot = 1;
+	else
+		disable_cpboot = 0;
+
+	pr_warn("%s : disable_cpboot:%u\n",__func__,disable_cpboot);
+        return 0;
+}
+early_param("androidboot.cpboot", get_cpboot_status);
+
 /**
  * pil_boot() - Load a peripheral image into memory and boot it
  * @desc: descriptor from pil_desc_init()
@@ -1267,6 +1283,7 @@ int pil_boot(struct pil_desc *desc)
 	struct pil_priv *priv = desc->priv;
 	bool mem_protect = false;
 	bool hyp_assign = false;
+	bool secure_check_fail = false;
 
 	ret = pil_notify_aop(desc, "on");
 	if (ret < 0) {
@@ -1315,6 +1332,13 @@ int pil_boot(struct pil_desc *desc)
 		goto release_fw;
 	}
 
+	if(disable_cpboot){
+		if ((!strcmp(desc->name, "mba")) || (!strcmp(desc->name, "modem"))){
+			ret = -EIO;
+			goto release_fw;
+		}
+	}
+
 	ret = pil_init_mmap(desc, mdt);
 	if (ret)
 		goto release_fw;
@@ -1331,6 +1355,7 @@ int pil_boot(struct pil_desc *desc)
 		ret = desc->ops->init_image(desc, fw->data, fw->size);
 	if (ret) {
 		pil_err(desc, "Initializing image failed(rc:%d)\n", ret);
+		secure_check_fail = true;
 		goto err_boot;
 	}
 
@@ -1404,6 +1429,7 @@ int pil_boot(struct pil_desc *desc)
 	ret = desc->ops->auth_and_reset(desc);
 	if (ret) {
 		pil_err(desc, "Failed to bring out of reset(rc:%d)\n", ret);
+		secure_check_fail = true;
 		goto err_auth_and_reset;
 	}
 	pil_log("reset_done", desc);
@@ -1448,6 +1474,11 @@ out:
 		}
 		pil_release_mmap(desc);
 		pil_notify_aop(desc, "off");
+
+		if (secure_check_fail && (ret == -EINVAL) &&
+		    (!strcmp(desc->name, "mba") ||
+		     !strcmp(desc->name, "modem")))
+			sec_peripheral_secure_check_fail();
 	}
 	return ret;
 }

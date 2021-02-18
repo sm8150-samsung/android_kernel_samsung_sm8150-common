@@ -2053,6 +2053,10 @@ struct qcom_glink *qcom_glink_native_probe(struct device *dev,
 
 	glink->irq = irq;
 
+	ret = enable_irq_wake(irq);
+	if (ret < 0)
+		dev_err(dev, "enable_irq_wake() failed on %d\n", irq);
+
 	size = of_property_count_u32_elems(dev->of_node, "cpu-affinity");
 	if (size > 0) {
 		arr = kmalloc_array(size, sizeof(u32), GFP_KERNEL);
@@ -2147,6 +2151,19 @@ void qcom_glink_native_unregister(struct qcom_glink *glink)
 	device_unregister(glink->dev);
 }
 EXPORT_SYMBOL_GPL(qcom_glink_native_unregister);
+
+const char *glink_intr_owner(int irq)
+{
+	struct irq_desc *desc = irq_to_desc(irq);
+	struct qcom_glink *glink;
+	
+	if (desc && desc->action) {
+		glink = desc->action->dev_id;
+		return glink?glink->name:NULL;
+	}
+
+	return NULL;
+}
 
 MODULE_DESCRIPTION("Qualcomm GLINK driver");
 MODULE_LICENSE("GPL v2");

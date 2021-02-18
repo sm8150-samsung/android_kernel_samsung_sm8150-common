@@ -669,7 +669,7 @@ int mhi_queue_buf(struct mhi_device *mhi_dev,
 	 */
 	if (unlikely(MHI_PM_IN_ERROR_STATE(mhi_cntrl->pm_state))) {
 		MHI_VERB("MHI is not in active state, pm_state:%s\n",
-			 to_mhi_pm_state_str(mhi_cntrl->pm_state));
+				to_mhi_pm_state_str(mhi_cntrl->pm_state));
 
 		return -EIO;
 	}
@@ -873,6 +873,7 @@ void mhi_create_devices(struct mhi_controller *mhi_cntrl)
 
 		/* add if there is a matching DT node */
 		mhi_assign_of_node(mhi_cntrl, mhi_dev);
+		
 
 		/*
 		 * if set, these device should get a early notification during
@@ -1508,7 +1509,6 @@ int mhi_process_bw_scale_ev_ring(struct mhi_controller *mhi_cntrl,
 	read_unlock_bh(&mhi_cntrl->pm_lock);
 
 	mhi_device_put(mhi_cntrl->mhi_dev, MHI_VOTE_DEVICE | MHI_VOTE_BUS);
-
 	mutex_unlock(&mhi_cntrl->pm_mutex);
 
 exit_bw_scale_process:

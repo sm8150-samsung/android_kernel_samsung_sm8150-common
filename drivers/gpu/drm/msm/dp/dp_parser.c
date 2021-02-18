@@ -18,6 +18,9 @@
 #include <linux/of_platform.h>
 
 #include "dp_parser.h"
+#ifdef CONFIG_SEC_DISPLAYPORT
+#include "secdp.h"
+#endif
 
 static void dp_parser_unmap_io_resources(struct dp_parser *parser)
 {
@@ -35,6 +38,8 @@ static int dp_parser_reg(struct dp_parser *parser)
 	struct platform_device *pdev = parser->pdev;
 	struct dp_io *io = &parser->io;
 	struct device *dev = &pdev->dev;
+
+	pr_debug("+++\n");
 
 	reg_count = of_property_count_strings(dev->of_node, "reg-names");
 	if (reg_count <= 0) {
@@ -109,6 +114,8 @@ static int dp_parser_aux(struct dp_parser *parser)
 	const char *data;
 	int const minimum_config_count = 1;
 
+	pr_debug("+++\n");
+
 	for (i = 0; i < PHY_AUX_CFG_MAX; i++) {
 		const char *property = dp_get_phy_aux_config_property(i);
 
@@ -153,6 +160,8 @@ static int dp_parser_misc(struct dp_parser *parser)
 	const char *data = NULL;
 
 	struct device_node *of_node = parser->pdev->dev.of_node;
+
+	pr_debug("+++\n");
 
 	data = of_get_property(of_node, "qcom,logical2physical-lane-map", &len);
 	if (data && (len == DP_MAX_PHY_LN)) {
@@ -201,6 +210,8 @@ static int dp_parser_msm_hdcp_dev(struct dp_parser *parser)
 	struct device_node *node;
 	struct platform_device *pdev;
 
+	pr_debug("+++\n");
+
 	node = of_find_compatible_node(NULL, NULL, "qcom,msm-hdcp");
 	if (!node) {
 		// This is a non-fatal error, module initialization can proceed
@@ -223,6 +234,8 @@ static int dp_parser_msm_hdcp_dev(struct dp_parser *parser)
 static int dp_parser_pinctrl(struct dp_parser *parser)
 {
 	struct dp_pinctrl *pinctrl = &parser->pinctrl;
+
+	pr_debug("+++\n");
 
 	pinctrl->pin = devm_pinctrl_get(&parser->pdev->dev);
 
@@ -278,6 +291,8 @@ static int dp_parser_gpio(struct dp_parser *parser)
 		"qcom,usbplug-cc-gpio",
 	};
 
+	pr_debug("+++\n");
+
 	if (of_find_property(of_node, "qcom,dp-hpd-gpio", NULL)) {
 		parser->no_aux_switch = true;
 		parser->lphw_hpd = of_find_property(of_node,
@@ -313,6 +328,13 @@ static int dp_parser_gpio(struct dp_parser *parser)
 		mp->gpio_config[i].value = 0;
 	}
 
+#ifdef CONFIG_SEC_DISPLAYPORT
+	for (i = 0; i < ARRAY_SIZE(dp_gpios); i++) {
+		pr_info("name(%s) gpio(%u) value(%u)\n", mp->gpio_config[i].gpio_name,
+			mp->gpio_config[i].gpio, mp->gpio_config[i].value);
+	}
+#endif
+
 	return 0;
 }
 
@@ -339,6 +361,11 @@ static int dp_parser_get_vreg(struct dp_parser *parser,
 
 	mp->num_vreg = 0;
 	pm_supply_name = dp_parser_supply_node_name(module);
+
+#ifdef CONFIG_SEC_DISPLAYPORT
+	pr_debug("pm_supply_name: %s\n", pm_supply_name);
+#endif
+
 	supply_root_node = of_get_child_by_name(of_node, pm_supply_name);
 	if (!supply_root_node) {
 		pr_err("no supply entry present: %s\n", pm_supply_name);
@@ -451,6 +478,24 @@ static void dp_parser_put_vreg_data(struct device *dev,
 	mp->num_vreg = 0;
 }
 
+#ifdef CONFIG_SEC_DISPLAYPORT
+struct regulator *aux_pullup_vreg;
+
+static struct regulator *secdp_get_aux_pullup_vreg(struct device *dev)
+{
+	struct regulator *vreg = NULL;
+
+	vreg = devm_regulator_get(dev, "aux-pullup");
+	if (IS_ERR(vreg)) {
+		pr_err("unable to get aux-pullup vdd supply\n");
+		return NULL;
+	}
+
+	pr_info("get aux-pullup vdd success\n");
+	return vreg;
+}
+#endif
+
 static int dp_parser_regulator(struct dp_parser *parser)
 {
 	int i, rc = 0;
@@ -469,6 +514,10 @@ static int dp_parser_regulator(struct dp_parser *parser)
 			break;
 		}
 	}
+
+#ifdef CONFIG_SEC_DISPLAYPORT
+	aux_pullup_vreg = secdp_get_aux_pullup_vreg(&pdev->dev);
+#endif
 
 	return rc;
 }
@@ -733,6 +782,11 @@ static int dp_parser_mst(struct dp_parser *parser)
 			"qcom,mst-enable");
 	parser->no_mst_encoder = of_property_read_bool(dev->of_node,
 			"qcom,no-mst-encoder");
+#ifndef SECDP_USE_MST
+	parser->has_mst = false;
+	parser->no_mst_encoder = true;
+	pr_debug("[secdp] mst disable!\n");
+#endif
 	parser->has_mst_sideband = parser->has_mst;
 
 	pr_debug("mst parsing successful. mst:%d\n", parser->has_mst);
@@ -799,6 +853,41 @@ static void dp_parser_widebus(struct dp_parser *parser)
 			parser->has_widebus);
 }
 
+#ifdef CONFIG_SEC_DISPLAYPORT
+static void secdp_parse_misc(struct dp_parser *parser)
+{
+	struct device *dev = &parser->pdev->dev;
+	struct device_node *of_node = dev->of_node;
+	const char* data;
+	int len = 0;
+
+	parser->cc_dir_inv = of_property_read_bool(dev->of_node, "secdp,cc-dir-inv");
+	pr_debug("secdp,cc-dir-inv: %d\n", parser->cc_dir_inv);
+
+	parser->aux_sel_inv = of_property_read_bool(dev->of_node,
+			"secdp,aux-sel-inv");
+	pr_debug("secdp,aux-sel-inv: %d\n", parser->aux_sel_inv);
+
+	parser->aux_sw_redrv = of_property_read_bool(dev->of_node,
+			"secdp,aux-sw-redrv");
+	pr_debug("secdp,aux-sw-redrv: %d\n", parser->aux_sw_redrv);
+
+	data = of_get_property(of_node, "secdp,dex-dft-res", &len);
+	if (data) {
+		if (!strncmp(data, "3440x1440", len))
+			parser->dex_dft_res = DEX_RES_3440X1440;
+	}
+	pr_debug("secdp,dex-dft-res: %s, %s\n", data,
+		secdp_dex_res_to_string(parser->dex_dft_res));
+
+	parser->prefer_res = of_property_read_bool(dev->of_node,
+			"secdp,prefer-res");
+	pr_debug("secdp,prefer-res: %d\n", parser->prefer_res);
+
+	return;
+}
+#endif
+
 static int dp_parser_parse(struct dp_parser *parser)
 {
 	int rc = 0;
@@ -808,6 +897,8 @@ static int dp_parser_parse(struct dp_parser *parser)
 		rc = -EINVAL;
 		goto err;
 	}
+	
+	pr_debug("+++\n");
 
 	rc = dp_parser_reg(parser);
 	if (rc)
@@ -852,6 +943,10 @@ static int dp_parser_parse(struct dp_parser *parser)
 	dp_parser_dsc(parser);
 	dp_parser_fec(parser);
 	dp_parser_widebus(parser);
+#ifdef CONFIG_SEC_DISPLAYPORT
+	secdp_parse_misc(parser);
+#endif
+
 err:
 	return rc;
 }

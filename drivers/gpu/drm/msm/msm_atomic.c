@@ -26,7 +26,8 @@
 #include "sde_trace.h"
 
 #define MULTIPLE_CONN_DETECTED(x) (x > 1)
-
+extern int smmu_fault_rec;
+extern int err_flag;
 struct msm_commit {
 	struct drm_device *dev;
 	struct drm_atomic_state *state;
@@ -509,7 +510,10 @@ static void msm_atomic_helper_commit_modeset_enables(struct drm_device *dev,
 		 * Each encoder has at most one connector (since we always steal
 		 * it away), so we won't call enable hooks twice.
 		 */
+		// KR_TEMP
+		pr_err("%s ++\n", __func__);
 		drm_bridge_pre_enable(encoder->bridge);
+		pr_err("%s --\n", __func__);
 		++bridge_enable_count;
 
 		if (funcs->enable)
@@ -564,6 +568,10 @@ static void msm_atomic_helper_commit_modeset_enables(struct drm_device *dev,
 	SDE_ATRACE_END("msm_enable");
 }
 
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+int ss_get_vdd_ndx_from_state(struct drm_atomic_state *old_state);
+#endif
+
 /* The (potentially) asynchronous part of the commit.  At this point
  * nothing can fail short of armageddon.
  */
@@ -573,6 +581,20 @@ static void complete_commit(struct msm_commit *c)
 	struct drm_device *dev = state->dev;
 	struct msm_drm_private *priv = dev->dev_private;
 	struct msm_kms *kms = priv->kms;
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	int ndx;
+#endif
+
+	pr_debug("%s ++ \n", __func__);
+
+	if (smmu_fault_rec) {
+		while (1)
+			msleep(20);
+	}
+	if (err_flag) {
+		while (1)
+			msleep(20);
+	}
 
 	drm_atomic_helper_wait_for_fences(dev, state, false);
 
@@ -581,6 +603,22 @@ static void complete_commit(struct msm_commit *c)
 	msm_atomic_helper_commit_modeset_disables(dev, state);
 
 	drm_atomic_helper_commit_planes(dev, state, 0);
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	ndx = ss_get_vdd_ndx_from_state(state);
+
+	/* TODO: check if _sde_encoder_trigger_start() is suitable
+	 * for ss_callback called..
+	 */
+	if (!kms->funcs->ss_callback) {
+		DRM_ERROR("No ss_callback function...\n");
+	} else {
+
+		kms->funcs->ss_callback(ndx, SS_EVENT_PANEL_ESD_RECOVERY, NULL);
+		kms->funcs->ss_callback(ndx, SS_EVENT_FRAME_UPDATE_PRE, NULL);
+	}
+#endif
+
 
 	msm_atomic_helper_commit_modeset_enables(dev, state);
 
@@ -599,6 +637,14 @@ static void complete_commit(struct msm_commit *c)
 
 	msm_atomic_wait_for_commit_done(dev, state);
 
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	if (!kms->funcs->ss_callback) {
+		DRM_ERROR("No ss_callback function...\n");
+	} else {
+		kms->funcs->ss_callback(ndx, SS_EVENT_FRAME_UPDATE_POST, NULL);
+	}
+#endif
+
 	drm_atomic_helper_cleanup_planes(dev, state);
 
 	kms->funcs->complete_commit(kms, state);
@@ -606,6 +652,8 @@ static void complete_commit(struct msm_commit *c)
 	drm_atomic_state_put(state);
 
 	commit_destroy(c);
+
+	pr_debug("%s -- \n", __func__);
 }
 
 static void _msm_drm_commit_work_cb(struct kthread_work *work)

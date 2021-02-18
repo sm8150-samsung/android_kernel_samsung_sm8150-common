@@ -22,6 +22,9 @@
 #include <dt-bindings/clock/mdss-10nm-pll-clk.h>
 #define CREATE_TRACE_POINTS
 #include "mdss_pll_trace.h"
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+#include "ss_dsi_panel_common.h"
+#endif
 
 #define VCO_DELAY_USEC 1
 
@@ -488,6 +491,10 @@ static void dsi_pll_setup_config(struct dsi_pll_10nm *pll,
 {
 	struct dsi_pll_config *config = &pll->pll_configuration;
 
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	struct samsung_display_driver_data *vdd = ss_get_vdd(PRIMARY_DISPLAY_NDX);
+#endif
+
 	config->ref_freq = 19200000;
 	config->output_div = 1;
 	config->dec_bits = 8;
@@ -504,6 +511,13 @@ static void dsi_pll_setup_config(struct dsi_pll_10nm *pll,
 	config->disable_prescaler = false;
 	config->enable_ssc = rsc->ssc_en;
 	config->ssc_center = rsc->ssc_center;
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	if (vdd->pll_ssc_disabled) {
+		pr_err_once("[10nm] disable pll ssc %d\n", vdd->pll_ssc_disabled);
+		config->enable_ssc = false;
+	}
+#endif
 
 	if (config->enable_ssc) {
 		if (rsc->ssc_freq)

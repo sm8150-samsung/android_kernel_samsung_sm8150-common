@@ -134,3 +134,10 @@ config QTI_RPM_SMD_COOLING_DEVICE
 	  railway at predefined voltage corner using RPM hardware.
 
 	  If you want this support, you should say Y here.
+
+config SEC_EXT_THERMAL_MONITOR
+	bool "Samsung external thermal monitor"
+	default n
+	help
+	  This enables external thermal monitor to get hint whether if there's
+	  external cause or not.

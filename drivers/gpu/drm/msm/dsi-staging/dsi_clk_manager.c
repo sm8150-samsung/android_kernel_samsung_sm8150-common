@@ -655,6 +655,10 @@ error:
 	return rc;
 }
 
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+extern void tcon_prepare(void);
+#endif
+
 static int dsi_display_link_clk_enable(struct dsi_link_clks *clks,
 	enum dsi_lclk_type l_type, u32 ctrl_count, u32 master_ndx)
 {
@@ -701,6 +705,10 @@ static int dsi_display_link_clk_enable(struct dsi_link_clks *clks,
 					rc);
 				goto error_disable_master;
 			}
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+			tcon_prepare();
+#endif
 		}
 
 		if (l_type & DSI_LINK_HS_CLK) {

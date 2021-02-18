@@ -118,9 +118,9 @@ Optional properties:
    PHY is expected to draw from the vdd power supply.
  - qcom,core-voltage-level: This property must be a list of three integer
    values (no, min, max) where each value represents either a voltage in
+   microvolts or a value corresponding to voltage corner.
  - qcom,core-max-load-uA: If present, indicates the maximum current (in uA) the
    PHY is expected to draw from the core power supply.
-   microvolts or a value corresponding to voltage corner.
  - qcom,link-training-reset: This property indicates to start link training
    timer to reset the elastic buffer based on rx equalization value.
  - extcon : phandle to external connector devices which provide type-C based

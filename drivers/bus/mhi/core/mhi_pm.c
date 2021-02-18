@@ -537,6 +537,7 @@ static int mhi_pm_mission_mode_transition(struct mhi_controller *mhi_cntrl)
 	if (MHI_REG_ACCESS_VALID(mhi_cntrl->pm_state))
 		mhi_timesync_log(mhi_cntrl);
 
+
 	mhi_special_events_pending(mhi_cntrl);
 
 	/* setup sysfs nodes for userspace votes */
@@ -1515,7 +1516,6 @@ int __mhi_device_get_sync(struct mhi_controller *mhi_cntrl)
 	if (MHI_PM_IN_SUSPEND_STATE(mhi_cntrl->pm_state))
 		mhi_trigger_resume(mhi_cntrl);
 	read_unlock_bh(&mhi_cntrl->pm_lock);
-
 	/* for offload write make sure wake DB is set before any MHI reg read */
 	mhi_force_reg_write(mhi_cntrl);
 

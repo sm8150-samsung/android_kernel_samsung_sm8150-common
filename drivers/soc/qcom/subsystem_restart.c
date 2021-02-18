@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2020, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -43,6 +43,14 @@
 
 #include "peripheral-loader.h"
 
+#ifdef CONFIG_SEC_DEBUG
+#include <linux/sec_debug.h>
+#endif
+#ifdef CONFIG_SUPPORT_AK0997X
+#include <linux/of_gpio.h>
+#endif
+
+
 #define DISABLE_SSR 0x9889deed
 /* If set to 0x9889deed, call to subsystem_restart_dev() returns immediately */
 static uint disable_restart_work;
@@ -50,6 +58,11 @@ module_param(disable_restart_work, uint, 0644);
 
 static int enable_debug;
 module_param(enable_debug, int, 0644);
+
+static bool silent_ssr[N_SSR];
+#define STOP_REASON_0_BIT 0x10
+#define STOP_REASON_1_BIT 0x20
+static bool adsp_silent_ssr;
 
 /* The maximum shutdown timeout is the product of MAX_LOOPS and DELAY_MS. */
 #define SHUTDOWN_ACK_MAX_LOOPS	100
@@ -83,6 +96,23 @@ static unsigned long timeout_vals[NUM_SSR_COMMS] = {
 #define cancel_timeout(subsys)
 #define init_subsys_timer(subsys)
 #endif /* CONFIG_SETUP_SSR_NOTIF_TIMEOUTS */
+
+#ifdef CONFIG_SEC_DEBUG
+#define DELAY_RESET_SOC	(IS_ENABLED(CONFIG_DIAG_CHAR) ? \
+					 msecs_to_jiffies(300) : 0)
+#define SEC_INIT_WORK(_w, _h)	INIT_DELAYED_WORK(_w, _h)
+#define sec_schedule_work(_w)	schedule_delayed_work(_w, DELAY_RESET_SOC)
+#define sec_to_work(_w)	to_delayed_work(_w)
+#define sec_work_struct delayed_work
+
+#else /* CONFIG_SEC_DEBUG */
+
+#define SEC_INIT_WORK(_w, _h)	INIT_WORK(_w, _h)
+#define sec_schedule_work(_w)	schedule_work(_w)
+#define sec_to_work(_w)	(_w)
+#define sec_work_struct work_struct
+
+#endif /* CONFIG_SEC_DEBUG */
 
 /**
  * enum p_subsys_state - state of a subsystem (private)
@@ -190,7 +220,7 @@ struct subsys_device {
 	struct work_struct work;
 	struct wakeup_source ssr_wlock;
 	char wlname[64];
-	struct work_struct device_restart_work;
+	struct sec_work_struct device_restart_work;
 	struct subsys_tracking track;
 
 	void *notify;
@@ -210,6 +240,9 @@ struct subsys_device {
 	enum crash_status crashed;
 	int notif_state;
 	struct list_head list;
+#ifdef CONFIG_SEC_BSP
+	spinlock_t crash_status_lock;
+#endif
 };
 
 static struct subsys_device *to_subsys(struct device *d)
@@ -545,7 +578,9 @@ static void notif_timeout_handler(unsigned long data)
 	default:
 		SSR_NOTIF_TIMEOUT_WARN(unknown_err_msg);
 	}
-
+#ifdef CONFIG_SEC_DEBUG
+	sec_debug_summary_set_timeout_subsys(timeout_data->source_name, timeout_data->dest_name);
+#endif
 }
 
 static void _setup_timeout(struct subsys_desc *source_ss,
@@ -747,6 +782,10 @@ static int wait_for_err_ready(struct subsys_device *subsys)
 					  msecs_to_jiffies(10000));
 	if (!ret) {
 		pr_err("[%s]: Error ready timed out\n", subsys->desc->name);
+		
+		if(!strcmp(subsys->desc->name, "modem"))	{
+			panic("Modem booting fail !");
+		}
 		return -ETIMEDOUT;
 	}
 
@@ -804,6 +843,7 @@ static int subsystem_powerup(struct subsys_device *dev, void *data)
 	pr_info("[%s:%d]: Powering up %s\n", current->comm, current->pid, name);
 	reinit_completion(&dev->err_ready);
 
+	enable_all_irqs(dev);
 	ret = dev->desc->powerup(dev->desc);
 	if (ret < 0) {
 		notify_each_subsys_device(&dev, 1, SUBSYS_POWERUP_FAILURE,
@@ -819,7 +859,6 @@ static int subsystem_powerup(struct subsys_device *dev, void *data)
 			pr_err("Powerup failure on %s\n", name);
 		return ret;
 	}
-	enable_all_irqs(dev);
 
 	ret = wait_for_err_ready(dev);
 	if (ret) {
@@ -909,11 +948,12 @@ static void subsys_stop(struct subsys_device *subsys)
 		subsys_set_state(subsys, SUBSYS_OFFLINING);
 		setup_timeout(NULL, subsys->desc,
 			      HLOS_TO_SUBSYS_SYSMON_SHUTDOWN);
+		pr_err("%s %s sysmon_send_shutdown\n", __func__, name);
 		subsys->desc->sysmon_shutdown_ret =
 				sysmon_send_shutdown(subsys->desc);
 		cancel_timeout(subsys->desc);
 		if (subsys->desc->sysmon_shutdown_ret)
-			pr_debug("Graceful shutdown failed for %s\n", name);
+			pr_err("Graceful shutdown failed for %s\n", name);
 	}
 
 	subsys->desc->shutdown(subsys->desc, false);
@@ -995,6 +1035,7 @@ void *__subsystem_get(const char *name, const char *fw_name)
 
 	track = subsys_get_track(subsys);
 	mutex_lock(&track->lock);
+	pr_err("%s: %s count:%d\n", __func__, name, subsys->count);
 	if (!subsys->count) {
 		if (fw_name) {
 			pr_info("Changing subsys fw_name to %s\n", fw_name);
@@ -1066,19 +1107,39 @@ void subsystem_put(void *subsystem)
 	if (IS_ERR_OR_NULL(subsys))
 		return;
 
+	/* 
+	 * When pm_proxy_helper put modem, it also shuts down esoc0.
+	 * If this occurs after ril's first voting, then esoc cannot be 
+	 * powered on again unless ril restarts.
+	 */
 	subsys_d = find_subsys_device(subsys->desc->poff_depends_on);
-	if (subsys_d)
+	if (subsys_d && strncmp("pm_proxy_helper", current->comm, strlen("pm_proxy_helper")))
 		subsystem_put(subsys_d);
 
 	track = subsys_get_track(subsys);
 	mutex_lock(&track->lock);
+	pr_err("%s: %s count:%d\n", __func__, subsys->desc->name, subsys->count);
 	if (WARN(!subsys->count, "%s: %s: Reference count mismatch\n",
 			subsys->desc->name, __func__))
 		goto err_out;
 	if (!--subsys->count) {
+#if 0	//CONFIG_SEC_DEBUG
+		/* TODO: CONFIG_SEC_DEBUG is disabled for subsystem_get()
+		 * of modem after platform shutdown
+		 */
+		if (strncmp(subsys->desc->name, "modem", 5)) {
+			subsys_stop(subsys);
+			if (subsys->do_ramdump_on_put)
+				subsystem_ramdump(subsys, NULL);
+		} else {
+			pr_err("subsys: block modem put stop for stabilty\n");
+			subsys->count++;
+		}
+#else
 		subsys_stop(subsys);
 		if (subsys->do_ramdump_on_put)
 			subsystem_ramdump(subsys, NULL);
+#endif
 		subsystem_free_memory(subsys, NULL);
 	}
 	mutex_unlock(&track->lock);
@@ -1103,6 +1164,13 @@ static void subsystem_restart_wq_func(struct work_struct *work)
 	unsigned long flags;
 	int ret;
 
+	/*
+	 * If plafrom is on waking-up, it is better to wait user space ready
+	 * to work. Without waiting pm suspend exit, before_shutdown routine
+	 * can not be fully processed.
+	 */
+	msleep(300);
+	
 	/*
 	 * It's OK to not take the registration lock at this point.
 	 * This is because the subsystem list inside the relevant
@@ -1161,9 +1229,12 @@ static void subsystem_restart_wq_func(struct work_struct *work)
 	track->p_state = SUBSYS_RESTARTING;
 	spin_unlock_irqrestore(&track->s_lock, flags);
 
-	/* Collect ram dumps for all subsystems in order here */
-	for_each_subsys_device(list, count, NULL, subsystem_ramdump);
-
+	if (sec_debug_is_enabled()) {
+		/* Collect ram dumps for all subsystems in order here */
+		pr_info("%s: collect ssr ramdump..\n", __func__);
+		for_each_subsys_device(list, count, NULL, subsystem_ramdump);
+		pr_info("%s: ..done\n", __func__);
+	}
 	for_each_subsys_device(list, count, NULL, subsystem_free_memory);
 
 	notify_each_subsys_device(list, count, SUBSYS_BEFORE_POWERUP, NULL);
@@ -1222,7 +1293,7 @@ static void __subsystem_restart_dev(struct subsys_device *dev)
 
 static void device_restart_work_hdlr(struct work_struct *work)
 {
-	struct subsys_device *dev = container_of(work, struct subsys_device,
+	struct subsys_device *dev = container_of(sec_to_work(work), struct subsys_device,
 							device_restart_work);
 
 	notify_each_subsys_device(&dev, 1, SUBSYS_SOC_RESET, NULL);
@@ -1235,9 +1306,36 @@ static void device_restart_work_hdlr(struct work_struct *work)
 							dev->desc->name);
 }
 
+void subsys_set_reset_reason(const char *name, int val)
+{
+	struct subsys_device *dev = find_subsys_device(name);
+
+	if (!dev || !dev->desc)
+		return;
+
+	pr_err("set restart reason .. to 0x%x\n", val);
+	if (val == 0x10) {
+		qcom_smem_state_update_bits(dev->desc->state,
+				STOP_REASON_0_BIT, STOP_REASON_0_BIT);
+		qcom_smem_state_update_bits(dev->desc->state,
+				STOP_REASON_1_BIT, 0);
+	} else if (val == 0x20) {
+		qcom_smem_state_update_bits(dev->desc->state,
+				STOP_REASON_0_BIT, 0);
+		qcom_smem_state_update_bits(dev->desc->state,
+				STOP_REASON_1_BIT, STOP_REASON_1_BIT);
+	} else {
+		qcom_smem_state_update_bits(dev->desc->state,
+				STOP_REASON_0_BIT, 0);
+		qcom_smem_state_update_bits(dev->desc->state,
+				STOP_REASON_1_BIT, 0);
+	}
+}
+
 int subsystem_restart_dev(struct subsys_device *dev)
 {
 	const char *name;
+	int ssr_disable = 1;
 
 	if (!get_device(&dev->dev))
 		return -ENODEV;
@@ -1251,6 +1349,53 @@ int subsystem_restart_dev(struct subsys_device *dev)
 
 	send_early_notifications(dev->early_notify);
 
+	if ((sec_debug_summary_is_modem_separate_debug_ssr() ==
+		SEC_DEBUG_MODEM_SEPARATE_EN)
+		&& strcmp(name, "slpi")
+		&& strcmp(name, "adsp")) {
+		pr_info("SSR separated by cp magic!!\n");
+		ssr_disable = sec_debug_is_enabled_for_ssr();
+	} else
+		pr_info("SSR by only ap debug level!!\n");
+
+	if (!sec_debug_is_enabled() || (!ssr_disable))
+		dev->restart_level = RESET_SUBSYS_COUPLED;
+	else
+		dev->restart_level = RESET_SOC;
+	
+	if (!strncmp(name, "modem", 5)) {
+		if (silent_ssr[MODEM_SSR])  /* qcrtr ioctl force silent ssr */
+			dev->restart_level = RESET_SUBSYS_COUPLED;
+		del_timer(&dev->desc->timeout_data.timer);
+		
+		qcom_smem_state_update_bits(dev->desc->state,
+				BIT(dev->desc->force_stop_bit), 0);
+		subsys_set_reset_reason(name, 0);
+		subsys_set_modem_silent_ssr(false, MODEM_SSR);
+	} else if (!strncmp(name, "esoc", 4) && silent_ssr[ESOC_SSR]) { 
+		dev->restart_level = RESET_SUBSYS_COUPLED;
+		subsys_set_modem_silent_ssr(false, ESOC_SSR);
+	}
+
+	/* force adsp silent ssr */
+	if (!strncmp(name, "adsp", 4) && adsp_silent_ssr) {
+		dev->restart_level = RESET_SUBSYS_COUPLED;
+		adsp_silent_ssr = false;
+	}
+#ifdef CONFIG_SENSORS_SSC
+	if (!strcmp(name, "slpi")) {
+#if defined(CONFIG_SEC_FACTORY) && defined(CONFIG_SUPPORT_DUAL_6AXIS)
+		if (is_pretest()) {	
+			pr_info("PreTest is running. slpi ssr!!\n");
+			dev->restart_level = RESET_SUBSYS_COUPLED;
+		}
+#endif
+		if (dev->desc->run_fssr) {
+			dev->restart_level = RESET_SUBSYS_COUPLED;
+			dev->desc->run_fssr = false;
+		}
+	}
+#endif
 	/*
 	 * If a system reboot/shutdown is underway, ignore subsystem errors.
 	 * However, print a message so that we know that a subsystem behaved
@@ -1278,7 +1423,7 @@ int subsystem_restart_dev(struct subsys_device *dev)
 		break;
 	case RESET_SOC:
 		__pm_stay_awake(&dev->ssr_wlock);
-		schedule_work(&dev->device_restart_work);
+		sec_schedule_work(&dev->device_restart_work);
 		return 0;
 	default:
 		panic("subsys-restart: Unknown restart level!\n");
@@ -1304,6 +1449,92 @@ int subsystem_restart(const char *name)
 	return ret;
 }
 EXPORT_SYMBOL(subsystem_restart);
+
+int subsystem_crash(const char *name)
+{
+	struct subsys_device *dev = find_subsys_device(name);
+
+	if (!dev)
+		return -ENODEV;
+
+	if (!get_device(&dev->dev))
+		return -ENODEV;
+
+	if (!subsys_get_crash_status(dev)) {
+		pr_err("%s: set force_stop_bit\n", __func__);
+		
+		qcom_smem_state_update_bits(dev->desc->state,
+				BIT(dev->desc->force_stop_bit),
+				BIT(dev->desc->force_stop_bit));
+				
+		/* watchdog timeo work for modem, starts here */
+		if (!strncmp(dev->desc->name, "modem", 5)) {
+			pr_warn("set %dms timeout in case of no stop ack from CP\n", 
+							CONFIG_SSR_SYSMON_NOTIF_TIMEOUT);
+			setup_timeout(dev->desc, NULL, SUBSYS_TO_HLOS);
+		}
+	}
+	return 0;
+}
+EXPORT_SYMBOL(subsystem_crash);
+
+#ifdef CONFIG_SEC_BSP
+bool is_subsystem_crash(const char *name)
+{
+	struct subsys_device *dev = find_subsys_device(name);
+
+	if (!dev)
+		return false;
+
+	return subsys_get_crash_status(dev) ? true : false;
+}
+EXPORT_SYMBOL(is_subsystem_crash);
+
+int is_subsystem_online(const char *name)
+{
+	struct subsys_device *dev = find_subsys_device(name);
+
+	if (!dev)
+		return false;
+
+	return dev->count;
+}
+EXPORT_SYMBOL(is_subsystem_online);
+#endif
+
+#ifdef CONFIG_SENSORS_SSC
+void subsys_set_fssr(struct subsys_device *dev, bool value)
+{
+	dev->desc->run_fssr = value;
+}
+#endif
+
+void subsys_set_modem_silent_ssr(bool value, int id)
+{
+	silent_ssr[id] = value;
+	pr_err("silent_ssr %s: %d\n", 
+			(id == MODEM_SSR) ? "modem" : "esoc", value);
+}
+EXPORT_SYMBOL(subsys_set_modem_silent_ssr);
+
+void subsys_set_adsp_silent_ssr(bool value)
+{
+	adsp_silent_ssr = value;
+}
+EXPORT_SYMBOL(subsys_set_adsp_silent_ssr);
+
+void subsys_force_stop(const char *name, bool val)
+{
+	if (strncmp(name, "modem", 5)) {
+		pr_err("only modem ssr supported %s: %d\n", name, val);
+		return;
+	}
+	subsys_set_modem_silent_ssr(val, MODEM_SSR);
+	subsys_set_reset_reason(name, silent_ssr[MODEM_SSR] ? 0x20 : 0x10);
+	subsystem_crash(name);
+}
+EXPORT_SYMBOL(subsys_force_stop);
+
 
 int subsystem_crashed(const char *name)
 {
@@ -1335,13 +1566,32 @@ EXPORT_SYMBOL(subsystem_crashed);
 void subsys_set_crash_status(struct subsys_device *dev,
 				enum crash_status crashed)
 {
+#ifdef CONFIG_SEC_BSP
+	unsigned long flags;
+	spin_lock_irqsave(&dev->crash_status_lock, flags);
+#endif
 	dev->crashed = crashed;
+#ifdef CONFIG_SEC_BSP
+	spin_unlock_irqrestore(&dev->crash_status_lock, flags);
+#endif
 }
 EXPORT_SYMBOL(subsys_set_crash_status);
 
 enum crash_status subsys_get_crash_status(struct subsys_device *dev)
 {
+#ifdef CONFIG_SEC_BSP
+	unsigned long flags;
+	enum crash_status status;
+	spin_lock_irqsave(&dev->crash_status_lock, flags);
+
+	status = dev->crashed;
+
+	spin_unlock_irqrestore(&dev->crash_status_lock, flags);
+
+	return status;
+#else
 	return dev->crashed;
+#endif
 }
 
 static struct subsys_device *desc_to_subsys(struct device *d)
@@ -1653,10 +1903,18 @@ static int subsys_parse_devicetree(struct subsys_desc *desc)
 	if (ret && ret != -ENOENT)
 		return ret;
 
+#ifdef CONFIG_SUPPORT_AK0997X
+	desc->d_hall_rst_gpio = of_get_named_gpio(pdev->dev.of_node,
+		"qcom,gpio-d-hall-rst", 0);
+	if (desc->d_hall_rst_gpio > 0)
+		pr_info("%s, %s get digital hall rst success(%d)\n", __func__,
+			desc->name, desc->d_hall_rst_gpio);
+#endif
+
 	ret = __get_smem_state(desc, "qcom,force-stop", &desc->force_stop_bit);
 	if (ret && ret != -ENOENT)
 		return ret;
-
+	
 	if (of_property_read_bool(pdev->dev.of_node,
 					"qcom,pil-generic-irq-handler")) {
 		ret = platform_get_irq(pdev, 0);
@@ -1838,7 +2096,7 @@ struct subsys_device *subsys_register(struct subsys_desc *desc)
 	snprintf(subsys->wlname, sizeof(subsys->wlname), "ssr(%s)", desc->name);
 	wakeup_source_init(&subsys->ssr_wlock, subsys->wlname);
 	INIT_WORK(&subsys->work, subsystem_restart_wq_func);
-	INIT_WORK(&subsys->device_restart_work, device_restart_work_hdlr);
+	SEC_INIT_WORK(&subsys->device_restart_work, device_restart_work_hdlr);
 	spin_lock_init(&subsys->track.s_lock);
 	init_subsys_timer(desc);
 
@@ -1908,7 +2166,9 @@ struct subsys_device *subsys_register(struct subsys_desc *desc)
 		if (ret < 0)
 			goto err_setup_irqs;
 	}
-
+#ifdef CONFIG_SEC_BSP
+	spin_lock_init(&subsys->crash_status_lock);
+#endif
 	return subsys;
 err_setup_irqs:
 	if (subsys->desc->edge)

@@ -15,6 +15,7 @@
 #include <linux/io.h>
 #include <linux/init.h>
 #include <linux/delay.h>
+#include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/clk.h>
@@ -22,7 +23,16 @@
 #include <linux/sched.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
+#include <linux/export.h>
+#include <linux/types.h>
 #include <soc/qcom/boot_stats.h>
+
+#ifdef CONFIG_SEC_BOOTSTAT
+uint32_t bs_linuxloader_start;
+uint32_t bs_linux_start;
+uint32_t bs_uefi_start;
+uint32_t bs_bootloader_load_kernel;
+#endif
 
 static void __iomem *mpm_counter_base;
 static phys_addr_t mpm_counter_pa;
@@ -69,25 +79,44 @@ static int mpm_parse_dt(void)
 
 static void print_boot_stats(void)
 {
-	pr_info("KPI: Bootloader start count = %u\n",
-			readl_relaxed(&boot_stats->bootloader_start));
-	pr_info("KPI: Bootloader end count = %u\n",
-			readl_relaxed(&boot_stats->bootloader_end));
+#ifdef CONFIG_SEC_BOOTSTAT
+	bs_linuxloader_start = readl_relaxed(&boot_stats->linuxloader_start);
+	bs_linux_start = readl_relaxed(&boot_stats->linux_start);
+	bs_uefi_start = readl_relaxed(&boot_stats->uefi_start);
+	bs_bootloader_load_kernel = readl_relaxed(
+					&boot_stats->bootloader_load_kernel);
+#endif
+
+	pr_info("KPI: Linux loader start count = %u\n",
+		readl_relaxed(&boot_stats->linuxloader_start));
+	pr_info("KPI: Kernel start count = %u\n",
+		readl_relaxed(&boot_stats->linux_start));
 	pr_info("KPI: Bootloader load kernel count = %u\n",
-			readl_relaxed(&boot_stats->load_kernel_done) -
-			readl_relaxed(&boot_stats->load_kernel_start));
-	pr_info("KPI: Kernel MPM timestamp = %u\n",
-			readl_relaxed(mpm_counter_base));
-	pr_info("KPI: Kernel MPM Clock frequency = %u\n",
-			mpm_counter_freq);
+		readl_relaxed(&boot_stats->bootloader_load_kernel));
 }
+
+phys_addr_t msm_timer_get_pa(void)
+{
+	return mpm_counter_pa;
+}
+
+#ifdef CONFIG_SEC_BOOTSTAT
+unsigned int get_boot_stat_time(void)
+{
+	return readl_relaxed(mpm_counter_base);
+}
+unsigned int get_boot_stat_freq(void)
+{
+	return mpm_counter_freq;
+}
+#endif
 
 unsigned long long int msm_timer_get_sclk_ticks(void)
 {
 	unsigned long long int t1, t2;
 	int loop_count = 10;
 	int loop_zero_count = 3;
-	u64 tmp = USEC_PER_SEC;
+	int tmp = USEC_PER_SEC;
 	void __iomem *sclk_tick;
 
 	do_div(tmp, TIMER_KHZ);
@@ -118,11 +147,6 @@ unsigned long long int msm_timer_get_sclk_ticks(void)
 	return t1;
 }
 
-phys_addr_t msm_timer_get_pa(void)
-{
-	return mpm_counter_pa;
-}
-
 int boot_stats_init(void)
 {
 	int ret;
@@ -135,13 +159,14 @@ int boot_stats_init(void)
 
 	if (!(boot_marker_enabled()))
 		boot_stats_exit();
-
 	return 0;
 }
 
 int boot_stats_exit(void)
 {
 	iounmap(boot_stats);
+#ifndef CONFIG_SEC_BOOTSTAT
 	iounmap(mpm_counter_base);
+#endif
 	return 0;
 }

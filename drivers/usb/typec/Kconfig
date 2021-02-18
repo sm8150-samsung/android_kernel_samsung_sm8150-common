@@ -3,6 +3,7 @@ menu "USB Power Delivery and Type-C drivers"
 
 config TYPEC
 	tristate
+	default y
 
 config TYPEC_WCOVE
 	tristate "Intel WhiskeyCove PMIC USB Type-C PHY driver"

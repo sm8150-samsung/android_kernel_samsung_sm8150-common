@@ -78,13 +78,28 @@ int hw_breakpoint_slots(int type)
 		AARCH64_DBG_WRITE(N, REG, VAL);	\
 		break
 
+//Reserve DBGBVR5_EL1 for CFP_ROPP_SYSREGKEY
+#ifdef CONFIG_RKP_CFP_ROPP_SYSREGKEY
+
+#define _READ_WB_REG_CASE(OFF, N, REG, VAL)
+#define _WRITE_WB_REG_CASE(OFF, N, REG, VAL)
+
+#else // NO CONFIG_RKP_CFP_ROPP_SYSREGKEY
+
+#define _READ_WB_REG_CASE(OFF, N, REG, VAL)	\
+	READ_WB_REG_CASE(OFF,  5, REG, VAL);
+#define _WRITE_WB_REG_CASE(OFF, N, REG, VAL)	\
+	WRITE_WB_REG_CASE(OFF,  5, REG, VAL);
+
+#endif //END CONFIG_RKP_CFP_ROPP_SYSREGKEY
+
 #define GEN_READ_WB_REG_CASES(OFF, REG, VAL)	\
 	READ_WB_REG_CASE(OFF,  0, REG, VAL);	\
 	READ_WB_REG_CASE(OFF,  1, REG, VAL);	\
 	READ_WB_REG_CASE(OFF,  2, REG, VAL);	\
 	READ_WB_REG_CASE(OFF,  3, REG, VAL);	\
 	READ_WB_REG_CASE(OFF,  4, REG, VAL);	\
-	READ_WB_REG_CASE(OFF,  5, REG, VAL);	\
+	_READ_WB_REG_CASE(OFF,  5, REG, VAL);	\
 	READ_WB_REG_CASE(OFF,  6, REG, VAL);	\
 	READ_WB_REG_CASE(OFF,  7, REG, VAL);	\
 	READ_WB_REG_CASE(OFF,  8, REG, VAL);	\
@@ -102,7 +117,7 @@ int hw_breakpoint_slots(int type)
 	WRITE_WB_REG_CASE(OFF,  2, REG, VAL);	\
 	WRITE_WB_REG_CASE(OFF,  3, REG, VAL);	\
 	WRITE_WB_REG_CASE(OFF,  4, REG, VAL);	\
-	WRITE_WB_REG_CASE(OFF,  5, REG, VAL);	\
+	_WRITE_WB_REG_CASE(OFF,  5, REG, VAL);	\
 	WRITE_WB_REG_CASE(OFF,  6, REG, VAL);	\
 	WRITE_WB_REG_CASE(OFF,  7, REG, VAL);	\
 	WRITE_WB_REG_CASE(OFF,  8, REG, VAL);	\
@@ -738,6 +753,27 @@ static u64 get_distance_from_watchpoint(unsigned long addr, u64 val,
 		return 0;
 }
 
+static int watchpoint_report(struct perf_event *wp, unsigned long addr,
+			     struct pt_regs *regs)
+{
+	int step = is_default_overflow_handler(wp);
+	struct arch_hw_breakpoint *info = counter_arch_bp(wp);
+
+	info->trigger = addr;
+
+	/*
+	 * If we triggered a user watchpoint from a uaccess routine, then
+	 * handle the stepping ourselves since userspace really can't help
+	 * us with this.
+	 */
+	if (!user_mode(regs) && info->ctrl.privilege == AARCH64_BREAKPOINT_EL0)
+		step = 1;
+	else
+		perf_bp_event(wp, regs);
+
+	return step;
+}
+
 static int watchpoint_handler(unsigned long addr, unsigned int esr,
 			      struct pt_regs *regs)
 {
@@ -747,7 +783,6 @@ static int watchpoint_handler(unsigned long addr, unsigned int esr,
 	u64 val;
 	struct perf_event *wp, **slots;
 	struct debug_info *debug_info;
-	struct arch_hw_breakpoint *info;
 	struct arch_hw_breakpoint_ctrl ctrl;
 
 	slots = this_cpu_ptr(wp_on_reg);
@@ -785,25 +820,13 @@ static int watchpoint_handler(unsigned long addr, unsigned int esr,
 		if (dist != 0)
 			continue;
 
-		info = counter_arch_bp(wp);
-		info->trigger = addr;
-		perf_bp_event(wp, regs);
-
-		/* Do we need to handle the stepping? */
-		if (is_default_overflow_handler(wp))
-			step = 1;
+		step = watchpoint_report(wp, addr, regs);
 	}
-	if (min_dist > 0 && min_dist != -1) {
-		/* No exact match found. */
-		wp = slots[closest_match];
-		info = counter_arch_bp(wp);
-		info->trigger = addr;
-		perf_bp_event(wp, regs);
 
-		/* Do we need to handle the stepping? */
-		if (is_default_overflow_handler(wp))
-			step = 1;
-	}
+	/* No exact match found? */
+	if (min_dist > 0 && min_dist != -1)
+		step = watchpoint_report(slots[closest_match], addr, regs);
+
 	rcu_read_unlock();
 
 	if (!step)
@@ -972,6 +995,13 @@ static int hw_breakpoint_reset(unsigned int cpu)
 	 * reprogrammed according to the debug slots content.
 	 */
 	for (slots = this_cpu_ptr(bp_on_reg), i = 0; i < core_num_brps; ++i) {
+#ifdef CONFIG_RKP_CFP_ROPP_SYSREGKEY
+		if (5 == i) {
+			/* There are too many logs so we cannot debug kernel */
+			//pr_warning("ROPP: Reserve BVR for CPU%d\n", cpu);
+			continue;
+		}
+#endif
 		if (slots[i]) {
 			hw_breakpoint_control(slots[i], HW_BREAKPOINT_RESTORE);
 		} else {

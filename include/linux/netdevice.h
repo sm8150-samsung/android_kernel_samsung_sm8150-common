@@ -2483,7 +2483,7 @@ void synchronize_net(void);
 int init_dummy_netdev(struct net_device *dev);
 
 DECLARE_PER_CPU(int, xmit_recursion);
-#define XMIT_RECURSION_LIMIT	10
+#define XMIT_RECURSION_LIMIT	8
 
 static inline int dev_recursion_level(void)
 {
@@ -3405,6 +3405,9 @@ void netdev_run_todo(void);
  */
 static inline void dev_put(struct net_device *dev)
 {
+	if (!dev->pcpu_refcnt)
+		return;
+
 	this_cpu_dec(*dev->pcpu_refcnt);
 }
 

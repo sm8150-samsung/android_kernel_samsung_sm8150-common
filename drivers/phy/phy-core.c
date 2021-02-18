@@ -308,9 +308,13 @@ err_pwr_on:
 	mutex_unlock(&phy->mutex);
 	phy_pm_runtime_put_sync(phy);
 err_pm_sync:
+	dev_err(&phy->dev, "phy err_pm_sync --> %d\n", ret);
 	if (phy->pwr)
 		regulator_disable(phy->pwr);
 out:
+	if (phy && phy->pwr)
+		dev_err(&phy->dev, "phy regulator is %s --> %d\n",
+				regulator_is_enabled(phy->pwr) ? "on" : "off", ret);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(phy_power_on);

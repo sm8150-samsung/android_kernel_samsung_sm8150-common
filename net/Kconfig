@@ -12,7 +12,7 @@ menuconfig NET
 	  The reason is that some programs need kernel networking support even
 	  when running on a stand-alone machine that isn't connected to any
 	  other computer.
-	  
+
 	  If you are upgrading from an older kernel, you
 	  should consider updating your networking tools too because changes
 	  in the kernel and the tools often go hand in hand. The tools are
@@ -88,6 +88,13 @@ if INET
 source "net/ipv4/Kconfig"
 source "net/ipv6/Kconfig"
 source "net/netlabel/Kconfig"
+#ifdef CONFIG_MPTCP
+	source "net/mptcp/Kconfig"
+#endif
+
+config NET_ANALYTICS
+	bool
+	default y
 
 endif # if INET
 
@@ -236,6 +243,9 @@ source "net/qrtr/Kconfig"
 source "net/ncsi/Kconfig"
 source "net/rmnet_data/Kconfig"
 source "net/rmnet_usb/Kconfig"
+# KNOX NPA - START
+source "net/ncm/Kconfig"
+# KNOX NPA - END
 
 config RPS
 	bool
@@ -358,7 +368,7 @@ config NET_TCPPROBE
 
 	Documentation on how to use TCP connection probing can be found
 	at:
-	
+
 	  http://www.linuxfoundation.org/collaborate/workgroups/networking/tcpprobe
 
 	To compile this code as a module, choose M here: the

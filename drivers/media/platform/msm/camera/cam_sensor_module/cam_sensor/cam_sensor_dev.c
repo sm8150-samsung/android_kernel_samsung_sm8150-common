@@ -174,6 +174,10 @@ static int32_t cam_sensor_driver_i2c_probe(struct i2c_client *client,
 	if (rc)
 		goto free_s_ctrl;
 
+	if (s_ctrl->sensordata->slave_info.sensor_slave_addr > 0)
+		s_ctrl->io_master_info.client->addr =
+			s_ctrl->sensordata->slave_info.sensor_slave_addr;
+
 	s_ctrl->i2c_data.per_frame =
 		(struct i2c_settings_array *)
 		kzalloc(sizeof(struct i2c_settings_array) *
@@ -199,7 +203,7 @@ static int32_t cam_sensor_driver_i2c_probe(struct i2c_client *client,
 	s_ctrl->bridge_intf.ops.flush_req = cam_sensor_flush_request;
 
 	s_ctrl->sensordata->power_info.dev = soc_info->dev;
-
+	v4l2_set_subdevdata(&(s_ctrl->v4l2_dev_str.sd), s_ctrl);
 	return rc;
 unreg_subdev:
 	cam_unregister_subdev(&(s_ctrl->v4l2_dev_str));
@@ -220,18 +224,11 @@ static int cam_sensor_platform_remove(struct platform_device *pdev)
 		return 0;
 	}
 
-	CAM_INFO(CAM_SENSOR, "platform remove invoked");
-	mutex_lock(&(s_ctrl->cam_sensor_mutex));
-	cam_sensor_shutdown(s_ctrl);
-	mutex_unlock(&(s_ctrl->cam_sensor_mutex));
-	cam_unregister_subdev(&(s_ctrl->v4l2_dev_str));
 	soc_info = &s_ctrl->soc_info;
 	for (i = 0; i < soc_info->num_clk; i++)
 		devm_clk_put(soc_info->dev, soc_info->clk[i]);
 
 	kfree(s_ctrl->i2c_data.per_frame);
-	platform_set_drvdata(pdev, NULL);
-	v4l2_set_subdevdata(&(s_ctrl->v4l2_dev_str.sd), NULL);
 	devm_kfree(&pdev->dev, s_ctrl);
 
 	return 0;
@@ -248,17 +245,11 @@ static int cam_sensor_driver_i2c_remove(struct i2c_client *client)
 		return 0;
 	}
 
-	CAM_INFO(CAM_SENSOR, "i2c remove invoked");
-	mutex_lock(&(s_ctrl->cam_sensor_mutex));
-	cam_sensor_shutdown(s_ctrl);
-	mutex_unlock(&(s_ctrl->cam_sensor_mutex));
-	cam_unregister_subdev(&(s_ctrl->v4l2_dev_str));
 	soc_info = &s_ctrl->soc_info;
 	for (i = 0; i < soc_info->num_clk; i++)
 		devm_clk_put(soc_info->dev, soc_info->clk[i]);
 
 	kfree(s_ctrl->i2c_data.per_frame);
-	v4l2_set_subdevdata(&(s_ctrl->v4l2_dev_str.sd), NULL);
 	kfree(s_ctrl);
 
 	return 0;
@@ -310,6 +301,10 @@ static int32_t cam_sensor_driver_platform_probe(
 	if (rc)
 		goto free_s_ctrl;
 
+	if (s_ctrl->sensordata->slave_info.sensor_slave_addr > 0)
+		s_ctrl->io_master_info.cci_client->sid =
+			s_ctrl->sensordata->slave_info.sensor_slave_addr >> 1;
+
 	s_ctrl->i2c_data.per_frame =
 		(struct i2c_settings_array *)
 		kzalloc(sizeof(struct i2c_settings_array) *
@@ -336,6 +331,8 @@ static int32_t cam_sensor_driver_platform_probe(
 
 	s_ctrl->sensordata->power_info.dev = &pdev->dev;
 	platform_set_drvdata(pdev, s_ctrl);
+	v4l2_set_subdevdata(&(s_ctrl->v4l2_dev_str.sd), s_ctrl);
+
 	s_ctrl->sensor_state = CAM_SENSOR_INIT;
 
 	return rc;
@@ -370,6 +367,9 @@ static struct i2c_driver cam_sensor_driver_i2c = {
 	.remove = cam_sensor_driver_i2c_remove,
 	.driver = {
 		.name = SENSOR_DRIVER_I2C,
+		.owner = THIS_MODULE,
+		.of_match_table = cam_sensor_driver_dt_match,
+		.suppress_bind_attrs = true,
 	},
 };
 

@@ -363,6 +363,9 @@ static void pd_locator_work(struct work_struct *work)
 	if (rc) {
 		pr_err("Failed to get process domains for %s for client %s rc:%d\n",
 			data->service_name, data->client_name, rc);
+#ifdef CONFIG_SLIMBUS_DEBUG
+		panic("Failed to get process domains");
+#endif
 		pdqw->notifier->notifier_call(pdqw->notifier,
 			LOCATOR_DOWN, NULL);
 		goto err_servloc_send_msg;

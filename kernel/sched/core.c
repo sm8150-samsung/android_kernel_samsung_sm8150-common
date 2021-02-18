@@ -40,6 +40,10 @@
 #include <asm/paravirt.h>
 #endif
 
+#ifdef CONFIG_SEC_DEBUG_SUMMARY
+#include <linux/sec_debug.h>
+#endif
+
 #include "sched.h"
 #include "walt.h"
 #include "../workqueue_internal.h"
@@ -49,6 +53,15 @@
 #include <trace/events/sched.h>
 
 DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
+
+#ifdef CONFIG_SEC_DEBUG_SCHED_LOG
+void summary_set_lpm_info_runqueues(struct sec_debug_summary_data_apss *apss)
+{
+	pr_info("%s : 0x%llx\n", __func__, virt_to_phys((void *)&runqueues));
+	apss->aplpm.p_runqueues = virt_to_phys((void *)&runqueues);
+	apss->aplpm.cstate_offset = offsetof(struct rq, cstate);
+}
+#endif
 
 /*
  * Debugging: various feature bits
@@ -3579,6 +3592,9 @@ static void __sched notrace __schedule(bool preempt)
 		trace_sched_switch(preempt, prev, next);
 
 		/* Also unlocks the rq: */
+#ifdef CONFIG_SEC_DEBUG_SCHED_LOG
+		sec_debug_task_sched_log(cpu, preempt, next, prev);
+#endif
 		rq = context_switch(rq, prev, next, &rf);
 	} else {
 		update_task_ravg(prev, rq, TASK_UPDATE, wallclock, 0);
@@ -3930,7 +3946,8 @@ void rt_mutex_setprio(struct task_struct *p, struct task_struct *pi_task)
 	 */
 	if (dl_prio(prio)) {
 		if (!dl_prio(p->normal_prio) ||
-		    (pi_task && dl_entity_preempt(&pi_task->dl, &p->dl))) {
+		    (pi_task && dl_prio(pi_task->prio) &&
+		     dl_entity_preempt(&pi_task->dl, &p->dl))) {
 			p->dl.dl_boosted = 1;
 			queue_flag |= ENQUEUE_REPLENISH;
 		} else
@@ -6238,7 +6255,7 @@ int sched_cpu_deactivate(unsigned int cpu)
 #ifdef CONFIG_PREEMPT
 	synchronize_sched();
 #endif
-	synchronize_rcu();
+	synchronize_rcu(); 
 
 #ifdef CONFIG_SCHED_SMT
 	/*

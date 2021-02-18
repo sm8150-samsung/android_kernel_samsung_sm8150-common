@@ -13,23 +13,6 @@
 #include <dt-bindings/thermal/thermal.h>
 
 &thermal_zones {
-	pm8150b_tz {
-		cooling-maps {
-			trip0_bat {
-				trip = <&pm8150b_trip0>;
-				cooling-device =
-					<&pm8150b_charger (THERMAL_MAX_LIMIT-1)
-						(THERMAL_MAX_LIMIT-1)>;
-			};
-			trip1_bat {
-				trip = <&pm8150b_trip1>;
-				cooling-device =
-					<&pm8150b_charger THERMAL_MAX_LIMIT
-						THERMAL_MAX_LIMIT>;
-			};
-		};
-	};
-
 	pm8150_tz {
 		cooling-maps {
 			trip0_cpu0 {
@@ -125,88 +108,7 @@
 		};
 	};
 
-	soc {
-		cooling-maps {
-			soc_cpu4 {
-				trip = <&soc_trip>;
-				cooling-device =
-					<&CPU4 THERMAL_MAX_LIMIT
-						THERMAL_MAX_LIMIT>;
-			};
-			soc_cpu5 {
-				trip = <&soc_trip>;
-				cooling-device =
-					<&CPU5 THERMAL_MAX_LIMIT
-						THERMAL_MAX_LIMIT>;
-			};
-			soc_cpu6 {
-				trip = <&soc_trip>;
-				cooling-device =
-					<&CPU6 THERMAL_MAX_LIMIT
-						THERMAL_MAX_LIMIT>;
-			};
-			soc_cpu7 {
-				trip = <&soc_trip>;
-				cooling-device =
-					<&CPU7 THERMAL_MAX_LIMIT
-						THERMAL_MAX_LIMIT>;
-			};
-		};
-	};
-
-	pm8150b-bcl-lvl0 {
-		cooling-maps {
-			vbat_cpu4 {
-				trip = <&b_bcl_lvl0>;
-				cooling-device =
-					<&CPU4 THERMAL_MAX_LIMIT
-						THERMAL_MAX_LIMIT>;
-			};
-			vbat_cpu5 {
-				trip = <&b_bcl_lvl0>;
-				cooling-device =
-					<&CPU5 THERMAL_MAX_LIMIT
-						THERMAL_MAX_LIMIT>;
-			};
-			vbat_gpu0 {
-				trip = <&b_bcl_lvl0>;
-				cooling-device = <&msm_gpu 2 2>;
-			};
-		};
-	};
-
-	pm8150b-bcl-lvl1 {
-		cooling-maps {
-			vbat_cpu6 {
-				trip = <&b_bcl_lvl1>;
-				cooling-device =
-					<&CPU6 THERMAL_MAX_LIMIT
-						THERMAL_MAX_LIMIT>;
-			};
-			vbat_cpu7 {
-				trip = <&b_bcl_lvl1>;
-				cooling-device =
-					<&CPU7 THERMAL_MAX_LIMIT
-						THERMAL_MAX_LIMIT>;
-			};
-			vbat_gpu1 {
-				trip = <&b_bcl_lvl1>;
-				cooling-device = <&msm_gpu 4 4>;
-			};
-		};
-	};
-
-	pm8150b-bcl-lvl2 {
-		cooling-maps {
-			vbat_gpu2 {
-				trip = <&b_bcl_lvl2>;
-				cooling-device = <&msm_gpu THERMAL_MAX_LIMIT
-							THERMAL_MAX_LIMIT>;
-			};
-		};
-	};
-
-	pm8150l-bcl-lvl0 {
+	pm8150l-vph-lvl0 {
 		disable-thermal-zone;
 		cooling-maps {
 			vph_cpu4 {

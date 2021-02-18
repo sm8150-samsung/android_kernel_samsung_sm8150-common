@@ -17,6 +17,7 @@
 #include <linux/swap.h>
 #include <linux/falloc.h>
 #include <linux/uio.h>
+#include <linux/fs.h>
 
 static const struct file_operations fuse_direct_io_file_operations;
 
@@ -378,7 +379,7 @@ static int fuse_wait_on_page_writeback(struct inode *inode, pgoff_t index)
 {
 	struct fuse_inode *fi = get_fuse_inode(inode);
 
-	wait_event(fi->page_waitq, !fuse_page_is_writeback(inode, index));
+	fuse_wait_event(fi->page_waitq, !fuse_page_is_writeback(inode, index));
 	return 0;
 }
 
@@ -2534,7 +2535,16 @@ long fuse_do_ioctl(struct file *file, unsigned int cmd, unsigned long arg,
 		struct iovec *iov = iov_page;
 
 		iov->iov_base = (void __user *)arg;
-		iov->iov_len = _IOC_SIZE(cmd);
+
+		switch (cmd) {
+		case FS_IOC_GETFLAGS:
+		case FS_IOC_SETFLAGS:
+			iov->iov_len = sizeof(int);
+			break;
+		default:
+			iov->iov_len = _IOC_SIZE(cmd);
+			break;
+		}
 
 		if (_IOC_DIR(cmd) & _IOC_WRITE) {
 			in_iov = iov;

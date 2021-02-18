@@ -73,6 +73,8 @@ MODULE_DESCRIPTION("USB Audio");
 MODULE_LICENSE("GPL");
 MODULE_SUPPORTED_DEVICE("{{Generic,USB Audio}}");
 
+#undef dev_dbg
+#define dev_dbg dev_err
 
 static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;	/* Index 0-MAX */
 static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;	/* ID for this card */
@@ -729,6 +731,7 @@ static int usb_audio_probe(struct usb_interface *intf,
 	err = snd_card_register(chip->card);
 	if (err < 0)
 		goto __error;
+	pr_info("%s : card %d is registered.\n", __func__, chip->card->number);
 
 	usb_chip[chip->index] = chip;
 	chip->num_interfaces++;
@@ -740,6 +743,7 @@ static int usb_audio_probe(struct usb_interface *intf,
 	return 0;
 
  __error:
+	pr_info("%s : card probe fail.\n", __func__);
 	if (chip) {
 		/* chip->active is inside the chip->card object,
 		 * decrement before memory is possibly returned.
@@ -762,6 +766,7 @@ static void usb_audio_disconnect(struct usb_interface *intf)
 	struct snd_card *card;
 	struct list_head *p;
 
+	pr_info("%s : disconnect!\n", __func__);
 	if (chip == (void *)-1L)
 		return;
 
@@ -867,8 +872,9 @@ static int usb_audio_suspend(struct usb_interface *intf, pm_message_t message)
 	if (chip == (void *)-1L)
 		return 0;
 
-	chip->autosuspended = !!PMSG_IS_AUTO(message);
-	if (!chip->autosuspended)
+	dev_dbg(&intf->dev, "suspend\n");
+	chip->system_suspend = !!PMSG_IS_AUTO(message);
+	if (!chip->system_suspend)
 		snd_power_change_state(chip->card, SNDRV_CTL_POWER_D3hot);
 	if (!chip->num_suspended_intf++) {
 		list_for_each_entry(as, &chip->pcm_list, list) {
@@ -880,6 +886,11 @@ static int usb_audio_suspend(struct usb_interface *intf, pm_message_t message)
 			snd_usbmidi_suspend(p);
 		list_for_each_entry(mixer, &chip->mixer_list, list)
 			snd_usb_mixer_suspend(mixer);
+	}
+
+	if (!PMSG_IS_AUTO(message) && !chip->system_suspend) {
+		snd_power_change_state(chip->card, SNDRV_CTL_POWER_D3hot);
+		chip->system_suspend = chip->num_suspended_intf;
 	}
 
 	return 0;
@@ -894,10 +905,11 @@ static int __usb_audio_resume(struct usb_interface *intf, bool reset_resume)
 
 	if (chip == (void *)-1L)
 		return 0;
-	if (--chip->num_suspended_intf)
-		return 0;
 
 	atomic_inc(&chip->active); /* avoid autopm */
+	if (chip->num_suspended_intf > 1)
+		goto out;
+
 	/*
 	 * ALSA leaves material resumption to user space
 	 * we just notify and restart the mixers
@@ -912,9 +924,12 @@ static int __usb_audio_resume(struct usb_interface *intf, bool reset_resume)
 		snd_usbmidi_resume(p);
 	}
 
-	if (!chip->autosuspended)
+ out:
+	if (chip->num_suspended_intf == chip->system_suspend) {
 		snd_power_change_state(chip->card, SNDRV_CTL_POWER_D0);
-	chip->autosuspended = 0;
+		chip->system_suspend = 0;
+	}
+	chip->num_suspended_intf--;
 
 err_out:
 	atomic_dec(&chip->active); /* allow autopm after this point */
@@ -923,6 +938,7 @@ err_out:
 
 static int usb_audio_resume(struct usb_interface *intf)
 {
+	dev_dbg(&intf->dev, "resume\n");
 	return __usb_audio_resume(intf, false);
 }
 

@@ -73,6 +73,14 @@
 #include <asm/io.h>
 #include <asm/unistd.h>
 
+#ifdef CONFIG_SECURITY_DEFEX
+#include <linux/defex.h>
+#endif
+
+#ifdef CONFIG_LOD_SEC
+#include <linux/linux_on_dex.h>
+#endif
+
 #ifndef SET_UNALIGN_CTL
 # define SET_UNALIGN_CTL(a, b)	(-EINVAL)
 #endif
@@ -360,6 +368,16 @@ SYSCALL_DEFINE2(setregid, gid_t, rgid, gid_t, egid)
 	if ((egid != (gid_t) -1) && !gid_valid(kegid))
 		return -EINVAL;
 
+#ifdef CONFIG_LOD_SEC
+	if (current_is_LOD()) {
+		if (!gid_is_LOD(krgid.val))
+			return -EACCES;
+
+		if (!gid_is_LOD(kegid.val))
+			return -EACCES;
+	}
+#endif
+
 	new = prepare_creds();
 	if (!new)
 		return -ENOMEM;
@@ -412,6 +430,13 @@ SYSCALL_DEFINE1(setgid, gid_t, gid)
 	kgid = make_kgid(ns, gid);
 	if (!gid_valid(kgid))
 		return -EINVAL;
+
+#ifdef CONFIG_LOD_SEC
+	if (current_is_LOD()) {
+		if (!gid_is_LOD(kgid.val))
+			return -EACCES;
+	}
+#endif
 
 	new = prepare_creds();
 	if (!new)
@@ -493,6 +518,16 @@ SYSCALL_DEFINE2(setreuid, uid_t, ruid, uid_t, euid)
 	if ((euid != (uid_t) -1) && !uid_valid(keuid))
 		return -EINVAL;
 
+#ifdef CONFIG_LOD_SEC
+	if (current_is_LOD()) {
+		if (!uid_is_LOD(kruid.val))
+			return -EACCES;
+
+		if (!uid_is_LOD(keuid.val))
+			return -EACCES;
+	}
+#endif
+
 	new = prepare_creds();
 	if (!new)
 		return -ENOMEM;
@@ -557,8 +592,16 @@ SYSCALL_DEFINE1(setuid, uid_t, uid)
 	kuid_t kuid;
 
 	kuid = make_kuid(ns, uid);
+
 	if (!uid_valid(kuid))
 		return -EINVAL;
+
+#ifdef CONFIG_LOD_SEC
+	if (current_is_LOD()) {
+		if (!uid_is_LOD(kuid.val))
+			return -EACCES;
+	}
+#endif
 
 	new = prepare_creds();
 	if (!new)
@@ -615,6 +658,19 @@ SYSCALL_DEFINE3(setresuid, uid_t, ruid, uid_t, euid, uid_t, suid)
 
 	if ((suid != (uid_t) -1) && !uid_valid(ksuid))
 		return -EINVAL;
+
+#ifdef CONFIG_LOD_SEC
+	if (current_is_LOD()) {
+		if (!uid_is_LOD(kruid.val))
+			return -EACCES;
+
+		if (!uid_is_LOD(keuid.val))
+			return -EACCES;
+
+		if (!uid_is_LOD(ksuid.val))
+			return -EACCES;
+	}
+#endif
 
 	new = prepare_creds();
 	if (!new)
@@ -701,6 +757,19 @@ SYSCALL_DEFINE3(setresgid, gid_t, rgid, gid_t, egid, gid_t, sgid)
 	if ((sgid != (gid_t) -1) && !gid_valid(ksgid))
 		return -EINVAL;
 
+#ifdef CONFIG_LOD_SEC
+	if (current_is_LOD()) {
+		if (!gid_is_LOD(krgid.val))
+			return -EACCES;
+
+		if (!gid_is_LOD(kegid.val))
+			return -EACCES;
+
+		if (!gid_is_LOD(ksgid.val))
+			return -EACCES;
+	}
+#endif
+
 	new = prepare_creds();
 	if (!new)
 		return -ENOMEM;
@@ -774,6 +843,18 @@ SYSCALL_DEFINE1(setfsuid, uid_t, uid)
 	kuid = make_kuid(old->user_ns, uid);
 	if (!uid_valid(kuid))
 		return old_fsuid;
+	
+#ifdef CONFIG_LOD_SEC
+	if (current_is_LOD()) {
+		if (!uid_is_LOD(kuid.val))
+			return -EACCES;
+	}
+#endif
+
+#ifdef CONFIG_SECURITY_DEFEX
+	if (task_defex_enforce(current, NULL, -__NR_setfsuid))
+		return old_fsuid;
+#endif
 
 	new = prepare_creds();
 	if (!new)
@@ -813,6 +894,18 @@ SYSCALL_DEFINE1(setfsgid, gid_t, gid)
 	kgid = make_kgid(old->user_ns, gid);
 	if (!gid_valid(kgid))
 		return old_fsgid;
+
+#ifdef CONFIG_LOD_SEC
+	if (current_is_LOD()) {
+		if (!gid_is_LOD(kgid.val))
+			return -EACCES;
+	}
+#endif
+
+#ifdef CONFIG_SECURITY_DEFEX
+	if (task_defex_enforce(current, NULL, -__NR_setfsgid))
+		return old_fsgid;
+#endif
 
 	new = prepare_creds();
 	if (!new)

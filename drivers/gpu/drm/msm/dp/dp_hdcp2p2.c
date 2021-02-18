@@ -23,6 +23,10 @@
 
 #include "sde_hdcp_2x.h"
 
+#ifdef CONFIG_SEC_DISPLAYPORT_ENG
+#include <linux/secdp_logger.h>
+#endif
+
 #define DP_INTR_STATUS2				(0x00000024)
 #define DP_INTR_STATUS3				(0x00000028)
 #define dp_read(offset) readl_relaxed((offset))
@@ -400,6 +404,9 @@ static int dp_hdcp2p2_aux_read_message(struct dp_hdcp2p2_ctrl *ctrl)
 	int size = ctrl->request.length, offset = ctrl->msg_part->offset;
 	u8 *buf = ctrl->request.data;
 
+	/* Skip read transaction if protocol library has notified
+	 * authentication failure.
+	 */
 	if (atomic_read(&ctrl->auth_state) == HDCP_STATE_INACTIVE ||
 		atomic_read(&ctrl->auth_state) == HDCP_STATE_AUTH_FAIL) {
 		pr_err("invalid hdcp state\n");
@@ -675,6 +682,10 @@ static int dp_hdcp2p2_read_rx_status(struct dp_hdcp2p2_ctrl *ctrl,
 	}
 
 	cp_irq = buf & BIT(2);
+#ifdef SECDP_TEST_HDCP2P2_REAUTH
+	cp_irq = true;
+	pr_debug("[HDCP2P2_REAUTH_TEST]\n");
+#endif
 	pr_debug("cp_irq=0x%x\n", cp_irq);
 	buf = 0;
 
@@ -687,6 +698,9 @@ static int dp_hdcp2p2_read_rx_status(struct dp_hdcp2p2_ctrl *ctrl,
 			goto error;
 		}
 		*rx_status = buf;
+#ifdef SECDP_TEST_HDCP2P2_REAUTH
+		*rx_status = 0x8;
+#endif
 		pr_debug("rx_status=0x%x\n", *rx_status);
 	}
 
@@ -783,6 +797,14 @@ static bool dp_hdcp2p2_supported(void *input)
 		pr_err("RxCaps read failed\n");
 		goto error;
 	}
+
+#ifdef CONFIG_SEC_DISPLAYPORT
+{
+	u32 i;
+	for (i = 0; i < DP_HDCP_RXCAPS_LENGTH; i++)
+		pr_debug("rxcaps[%d] 0x%x\n", i, buf[i]);
+}
+#endif
 
 	pr_debug("HDCP_CAPABLE=%lu\n", (buf[2] & BIT(1)) >> 1);
 	pr_debug("VERSION=%d\n", buf[0]);

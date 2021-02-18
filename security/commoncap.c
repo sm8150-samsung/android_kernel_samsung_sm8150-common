@@ -31,6 +31,10 @@
 #include <linux/binfmts.h>
 #include <linux/personality.h>
 
+#ifdef CONFIG_LOD_SEC
+#include <linux/linux_on_dex.h>
+#endif
+
 /*
  * If a non-root user executes a setuid-root binary in
  * !secure(SECURE_NOROOT) mode, then we raise capabilities.
@@ -72,6 +76,25 @@ int __cap_capable(const struct cred *cred, struct user_namespace *targ_ns,
 		int cap, int audit)
 {
 	struct user_namespace *ns = targ_ns;
+
+/*
+ * Check the LoD capabilities
+ * If no cap, return EPERM immediately, skipping following checks
+ * If has cap, continue namespace check
+ */
+#ifdef CONFIG_LOD_SEC
+	if (cred_is_LOD(cred)) {
+		if (cap_raised(CAP_LOD_SET, cap) == 0){
+#ifndef CONFIG_SAMSUNG_PRODUCT_SHIP
+			if (cap != 21) //ignore 21 avoid flooding
+				printk(KERN_ERR "LOD cap_capable: blocking CAP %d PROC %s "
+					"PID %d UID %d\n", cap, current->comm, current->pid,
+					cred->uid.val);
+#endif
+			return -EPERM;
+		}
+	}
+#endif
 
 #ifdef CONFIG_ANDROID_PARANOID_NETWORK
 	if (cap == CAP_NET_RAW && in_egroup_p(AID_NET_RAW))
@@ -723,6 +746,7 @@ int cap_bprm_set_creds(struct linux_binprm *bprm)
 	int ret;
 	kuid_t root_uid;
 
+	new->cap_ambient = old->cap_ambient;
 	if (WARN_ON(!cap_ambient_invariant_ok(old)))
 		return -EPERM;
 

@@ -27,6 +27,9 @@
 #include <linux/reset.h>
 #include <linux/hrtimer.h>
 #include <soc/qcom/socinfo.h>
+#ifdef CONFIG_SEC_DISPLAYPORT
+#include <linux/sec_displayport.h>
+#endif
 
 enum core_ldo_levels {
 	CORE_LEVEL_NONE = 0,
@@ -91,6 +94,9 @@ enum core_ldo_levels {
 #define USB3_UNI_PCS_EQ_CONFIG5		0x09EC
 #define RXEQ_RETRAIN_MODE_SEL		BIT(6)
 
+/* USB3_QSERDES_COM_CMN_STATUS */
+#define PLL_LOCKED			BIT(1)
+
 enum qmp_phy_rev_reg {
 	USB3_PHY_PCS_STATUS,
 	USB3_PHY_AUTONOMOUS_MODE_CTRL,
@@ -114,6 +120,7 @@ enum qmp_phy_rev_reg {
 	USB3_DP_PCS_PCS_STATUS2,
 	USB3_DP_PCS_INSIG_SW_CTRL3,
 	USB3_DP_PCS_INSIG_MX_CTRL3,
+	USB3_QSERDES_COM_CMN_STATUS,
 	USB3_PHY_REG_MAX,
 };
 
@@ -254,7 +261,7 @@ static int msm_ssusb_qmp_ldo_enable(struct msm_ssphy_qmp *phy, int on)
 {
 	int min, rc = 0;
 
-	dev_dbg(phy->phy.dev, "reg (%s)\n", on ? "HPM" : "LPM");
+	dev_info(phy->phy.dev, "reg (%s)\n", on ? "HPM" : "LPM");
 
 	if (phy->power_enabled == on) {
 		dev_dbg(phy->phy.dev, "PHYs' regulators status %d\n",
@@ -501,7 +508,7 @@ static int msm_ssphy_qmp_init(struct usb_phy *uphy)
 	unsigned int init_timeout_usec = INIT_MAX_TIME_USEC;
 	const struct qmp_reg_val *reg = NULL;
 
-	dev_dbg(uphy->dev, "Initializing QMP phy\n");
+	dev_info(uphy->dev, "Initializing QMP phy\n");
 
 	ret = msm_ssusb_qmp_ldo_enable(phy, 1);
 	if (ret) {
@@ -569,6 +576,10 @@ static int msm_ssphy_qmp_dp_combo_reset(struct usb_phy *uphy)
 	struct msm_ssphy_qmp *phy = container_of(uphy, struct msm_ssphy_qmp,
 					phy);
 	int ret = 0;
+
+#ifdef CONFIG_SEC_DISPLAYPORT
+	secdp_wait_for_disconnect_complete();
+#endif
 
 	if (phy->phy.flags & PHY_USB_DP_CONCURRENT_MODE) {
 		dev_dbg(uphy->dev, "Resetting USB part of QMP phy\n");
@@ -710,7 +721,7 @@ static int msm_ssphy_qmp_set_suspend(struct usb_phy *uphy, int suspend)
 	struct msm_ssphy_qmp *phy = container_of(uphy, struct msm_ssphy_qmp,
 					phy);
 
-	dev_dbg(uphy->dev, "QMP PHY set_suspend for %s called with cable %s\n",
+	dev_info(uphy->dev, "QMP PHY set_suspend for %s called with cable %s\n",
 			(suspend ? "suspend" : "resume"),
 			get_cable_status_str(phy));
 
@@ -724,6 +735,9 @@ static int msm_ssphy_qmp_set_suspend(struct usb_phy *uphy, int suspend)
 		if (phy->cable_connected) {
 			msm_ssusb_qmp_enable_autonomous(phy, 1);
 		} else {
+#ifdef CONFIG_SEC_DISPLAYPORT
+			secdp_wait_for_disconnect_complete();
+#endif
 			/* Reset phy mode to USB only if DP not connected */
 			if (uphy->type  == USB_PHY_TYPE_USB3_AND_DP &&
 				!(phy->phy.flags & PHY_USB_DP_CONCURRENT_MODE))
@@ -861,6 +875,7 @@ static int msm_ssphy_qmp_powerup(struct usb_phy *uphy, bool powerup)
 {
 	struct msm_ssphy_qmp *phy = container_of(uphy, struct msm_ssphy_qmp,
 					phy);
+	unsigned int pll_lock_timeout_usec = INIT_MAX_TIME_USEC;
 	u8 reg = powerup ? 1 : 0;
 	u8 temp;
 
@@ -877,6 +892,25 @@ static int msm_ssphy_qmp_powerup(struct usb_phy *uphy, bool powerup)
 			phy->base + phy->phy_reg[USB3_PHY_POWER_DOWN_CONTROL]);
 	temp = readl_relaxed(phy->base +
 			phy->phy_reg[USB3_PHY_POWER_DOWN_CONTROL]);
+
+	if (powerup) {
+		do {
+			if (readl_relaxed(phy->base +
+				phy->phy_reg[USB3_QSERDES_COM_CMN_STATUS])
+					& PLL_LOCKED)
+				break;
+
+			usleep_range(1, 2);
+		} while (--pll_lock_timeout_usec);
+
+		if (!pll_lock_timeout_usec) {
+			dev_dbg(uphy->dev, "QMP PHY PLL lock failed\n");
+			dev_dbg(uphy->dev, "USB3_QSERDES_COM_CMN_STATUS:%x\n",
+				readl_relaxed(phy->base +
+				phy->phy_reg[USB3_QSERDES_COM_CMN_STATUS]));
+			return -EBUSY;
+		};
+	}
 
 	dev_dbg(uphy->dev, "P3 powerup:%x\n", temp);
 

@@ -47,7 +47,7 @@
 		mboxes = <&qmp_aop 0>;
 	};
 
-	aliases {
+	aliases: aliases {
 		ufshc1 = &ufshc_mem; /* Embedded UFS slot */
 		sdhc2 = &sdhc_2; /* SDC2 SD card slot */
 		pci-domain0 = &pcie0; /* PCIe0 domain */
@@ -56,9 +56,6 @@
 		mhi1 = &mhi_1;
 		mhi_netdev0 = &mhi_netdev_0;
 		mhi_netdev2 = &mhi_netdev_2;
-	};
-
-	aliases {
 		serial0 = &qupv3_se12_2uart;
 		hsuart0 = &qupv3_se13_4uart;
 		hsuart1 = &qupv3_se4_2uart;
@@ -555,12 +552,14 @@
 	soc: soc { };
 
 	firmware: firmware {
-		android {
+		android: android {
 			compatible = "android,firmware";
 			shared_meta: vbmeta {
 				compatible = "android,vbmeta";
-				parts = "vbmeta,boot,system,vendor,dtbo,odm";
+				parts = "vbmeta,boot,system,vendor,dtbo";
 			};
+/* Disabled for VTS. VTS test check if devicetree-dt fstab is or not. If it is, it check metadata. 
+ * It does not match SS style. Because SS does not support dt fstab in Q
 			android_q_fstab: fstab {
 				compatible = "android,fstab";
 				vendor {
@@ -571,15 +570,8 @@
 					fsmgr_flags = "wait,slotselect,avb";
 					status = "ok";
 				};
-				odm {
-					compatible = "android,odm";
-					dev = "/dev/block/platform/soc/8804000.sdhci/by-name/odm";
-					type = "ext4";
-					mnt_flags = "ro,barrier=1,discard";
-					fsmgr_flags = "wait,slotselect,avb";
-					status = "ok";
-				};
 			};
+*/
 		};
 	};
 
@@ -693,12 +685,12 @@
 		};
 
 		cont_splash_memory: cont_splash_region {
-			reg = <0x0 0x9c000000 0x0 0x02400000>;
+			reg = <0x0 0x9c400000 0x0 0x02000000>;
 			label = "cont_splash_region";
 		};
 
 		disp_rdump_memory: disp_rdump_region {
-			reg = <0x0 0x9c000000 0x0 0x02400000>;
+			reg = <0x0 0x9c400000 0x0 0x02000000>;
 			label = "disp_rdump_region";
 		};
 
@@ -727,11 +719,7 @@
 		};
 
 		qseecom_ta_mem: qseecom_ta_region {
-			compatible = "shared-dma-pool";
-			alloc-ranges = <0x0 0x00000000 0x0 0xffffffff>;
-			reusable;
-			alignment = <0x0 0x400000>;
-			size = <0x0 0x1000000>;
+			reg = <0 0xff000000 0 0x1000000>;
 		};
 
 		sp_mem: sp_region {  /* SPSS-HLOS ION shared mem */
@@ -2296,8 +2284,8 @@
 
 	ufshc_mem: ufshc@1d84000 {
 		compatible = "qcom,ufshc";
-		reg = <0x1d84000 0x2500>, <0x1d90000 0x8000>;
-		reg-names = "ufs_mem", "ufs_ice";
+		reg = <0x1d84000 0x2500>, <0x1d90000 0x8000>, <0x1d87000 0xe00>;
+		reg-names = "ufs_mem", "ufs_ice", "ufs_phy";
 		interrupts = <0 265 0>;
 		phys = <&ufsphy_mem>;
 		phy-names = "ufsphy";
@@ -2581,7 +2569,7 @@
 
 		qcom,restore-after-cx-collapse;
 
-		qcom,clk-rates = <400000 20000000 25000000
+		qcom,clk-rates = <300000 400000 20000000 25000000
 					50000000 100000000 201500000>;
 		qcom,bus-speed-mode = "SDR12", "SDR25", "SDR50", "DDR50",
 				      "SDR104";
@@ -2924,6 +2912,11 @@
 				qcom,intents = <0x4000 1 >;
 			};
 		};
+	};
+
+	qcom,aop-ddr-msgs {
+		compatible = "qcom,aop-ddr-msgs";
+		mboxes = <&qmp_aop 0>;
 	};
 
 	qcom,glinkpkt {
@@ -3692,6 +3685,7 @@
 
 	ipa_smmu_wlan: ipa_smmu_wlan {
 		compatible = "qcom,ipa-smmu-wlan-cb";
+		qcom,smmu-s1-bypass;
 		iommus = <&apps_smmu 0x521 0x0>;
 		qcom,additional-mapping =
 		/* ipa-uc ram */
@@ -3852,6 +3846,7 @@
 		vdd-3.3-ch0-supply = <&pm8150l_l11>;
 		qcom,vdd-cx-mx-config = <752000 752000>;
 		qcom,vdd-3.3-ch0-config = <3104000 3312000>;
+		qcom,smmu-s1-bypass;
 		qcom,smp2p_map_wlan_1_in {
 			interrupts-extended = <&smp2p_wlan_1_in 0 0>,
 					      <&smp2p_wlan_1_in 1 0>;

@@ -444,6 +444,7 @@ static int snd_pcm_update_hw_ptr0(struct snd_pcm_substream *substream,
 
  no_delta_check:
 	if (runtime->status->hw_ptr == new_hw_ptr) {
+		runtime->hw_ptr_jiffies = curr_jiffies;
 		update_audio_tstamp(substream, &curr_tstamp, &audio_tstamp);
 		return 0;
 	}
@@ -1869,7 +1870,7 @@ static int wait_for_avail(struct snd_pcm_substream *substream,
 			long t = runtime->period_size * 2 / runtime->rate;
 			wait_time = max(t, wait_time);
 		}
-		wait_time = msecs_to_jiffies(wait_time * 1000);
+		wait_time = msecs_to_jiffies(wait_time * 100);
 	}
 
 	for (;;) {

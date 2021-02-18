@@ -2714,7 +2714,7 @@ void task_tick_numa(struct rq *rq, struct task_struct *curr)
 	/*
 	 * We don't care about NUMA placement if we don't have memory.
 	 */
-	if (!curr->mm || (curr->flags & PF_EXITING) || work->next != work)
+	if ((curr->flags & (PF_EXITING | PF_KTHREAD)) || work->next != work)
 		return;
 
 	/*
@@ -7390,6 +7390,11 @@ static int start_cpu(struct task_struct *p, bool boosted,
 		return rd->max_cap_orig_cpu;
 	}
 
+	if (schedtune_prefer_prime(p))
+		return rd->max_cap_orig_cpu;
+	else if(task_placement_boost_enabled(p))
+		return rd->mid_cap_orig_cpu;
+
 	/* A task always fits on its rtg_target */
 	if (rtg_target) {
 		int rtg_target_cpu = cpumask_first_and(rtg_target,
@@ -9319,12 +9324,19 @@ redo:
 		if (!can_migrate_task(p, env))
 			goto next;
 
-		load = task_h_load(p);
+		/*
+		 * Depending of the number of CPUs and tasks and the
+		 * cgroup hierarchy, task_h_load() can return a null
+		 * value. Make sure that env->imbalance decreases
+		 * otherwise detach_tasks() will stop only after
+		 * detaching up to loop_max tasks.
+		 */
+		load = max_t(unsigned long, task_h_load(p), 1);
+
 
 		if (sched_feat(LB_MIN) && load < 16 && !env->sd->nr_balance_failed)
 			goto next;
-
-		/*
+	/*
 		 * p is not running task when we goes until here, so if p is one
 		 * of the 2 task in src cpu rq and not the running one,
 		 * that means it is the only task that can be balanced.
@@ -9334,7 +9346,7 @@ redo:
 		 */
 		if (((cpu_rq(env->src_cpu)->nr_running > 2) ||
 			(env->flags & LBF_IGNORE_BIG_TASKS)) &&
-			((load / 2) > env->imbalance))
+			(load / 2) > env->imbalance)
 			goto next;
 
 		detach_task(p, env);

@@ -18,6 +18,7 @@
 #include <linux/of_irq.h>
 #include <linux/of.h>
 #include <linux/pm_wakeup.h>
+#include <linux/delay.h>
 
 #define PROC_AWAKE_ID 12 /* 12th bit */
 #define AWAKE_BIT BIT(PROC_AWAKE_ID)
@@ -39,6 +40,7 @@ static int sleepstate_pm_notifier(struct notifier_block *nb,
 	switch (event) {
 	case PM_SUSPEND_PREPARE:
 		qcom_smem_state_update_bits(state, AWAKE_BIT, 0);
+		usleep_range(20000, 20500); /* Tuned based on SMP2P latencies */
 		break;
 
 	case PM_POST_SUSPEND:
@@ -57,6 +59,7 @@ static struct notifier_block sleepstate_pm_nb = {
 static irqreturn_t smp2p_sleepstate_handler(int irq, void *ctxt)
 {
 	__pm_wakeup_event(&notify_ws, 200);
+	pr_info("smp2p hold wake lock for 200 msec");
 	return IRQ_HANDLED;
 }
 

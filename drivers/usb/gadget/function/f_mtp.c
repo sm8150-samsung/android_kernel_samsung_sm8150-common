@@ -468,6 +468,17 @@ static struct usb_request
 	return req;
 }
 
+/* Make bulk-out requests be divisible by the maxpacket size */
+static void set_read_req_length(struct usb_request *req)
+{
+	struct mtp_dev *dev = _mtp_dev;
+	unsigned int	rem;
+
+	rem = req->length % dev->ep_out->maxpacket;
+	if (rem > 0)
+		req->length += dev->ep_out->maxpacket - rem;
+}
+
 static void mtp_complete_in(struct usb_ep *ep, struct usb_request *req)
 {
 	struct mtp_dev *dev = _mtp_dev;
@@ -656,6 +667,8 @@ requeue_req:
 	req = dev->rx_req[0];
 	req->length = len;
 	dev->rx_done = 0;
+	set_read_req_length(req);
+	mutex_unlock(&dev->read_mutex);
 	ret = usb_ep_queue(dev->ep_out, req, GFP_KERNEL);
 	if (ret < 0) {
 		r = -EIO;
@@ -822,6 +835,11 @@ static void send_file_work(struct work_struct *data)
 	offset = dev->xfer_file_offset;
 	count = dev->xfer_file_length;
 
+	if (count < 0) {
+		dev->xfer_result = -EINVAL;
+		return;
+	}
+
 	mtp_log("(%lld %lld)\n", offset, count);
 
 	if (dev->xfer_send_header) {
@@ -935,6 +953,11 @@ static void receive_file_work(struct work_struct *data)
 	filp = dev->xfer_file;
 	offset = dev->xfer_file_offset;
 	count = dev->xfer_file_length;
+
+	if (count < 0) {
+		dev->xfer_result = -EINVAL;
+		return;
+	}
 
 	mtp_log("(%lld)\n", count);
 	if (!IS_ALIGNED(count, dev->ep_out->maxpacket))
@@ -1892,7 +1915,11 @@ struct usb_function *function_alloc_mtp_ptp(struct usb_function_instance *fi,
 	dev->function.unbind = mtp_function_unbind;
 	dev->function.set_alt = mtp_function_set_alt;
 	dev->function.disable = mtp_function_disable;
+#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
+	dev->function.ctrlrequest = mtp_ctrlreq_configfs;
+#else
 	dev->function.setup = mtp_ctrlreq_configfs;
+#endif
 	dev->function.free_func = mtp_free;
 	fi->f = &dev->function;
 

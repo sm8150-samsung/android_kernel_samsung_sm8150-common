@@ -308,6 +308,7 @@ static void sde_hw_sspp_setup_format(struct sde_hw_pipe *ctx,
 	u32 alpha_en_mask = 0;
 	u32 op_mode_off, unpack_pat_off, format_off;
 	u32 idx;
+	u32 opmode_rb = 0, opmode_initial = 0;
 
 	if (_sspp_subblk_offset(ctx, SDE_SSPP_SRC, &idx) || !fmt)
 		return;
@@ -324,6 +325,7 @@ static void sde_hw_sspp_setup_format(struct sde_hw_pipe *ctx,
 
 	c = &ctx->hw;
 	opmode = SDE_REG_READ(c, op_mode_off + idx);
+	opmode_initial = opmode;
 	opmode &= ~(MDSS_MDP_OP_FLIP_LR | MDSS_MDP_OP_FLIP_UD |
 			MDSS_MDP_OP_BWC_EN | MDSS_MDP_OP_PE_OVERRIDE);
 
@@ -405,6 +407,11 @@ static void sde_hw_sspp_setup_format(struct sde_hw_pipe *ctx,
 	SDE_REG_WRITE(c, format_off + idx, src_format);
 	SDE_REG_WRITE(c, unpack_pat_off + idx, unpack);
 	SDE_REG_WRITE(c, op_mode_off + idx, opmode);
+
+	opmode_rb = SDE_REG_READ(c, op_mode_off + idx);
+	SDE_EVT32(ctx->idx, opmode, opmode_rb, opmode_initial, flags,
+			ctx->catalog->pipe_order_type,
+			rect_mode, idx, op_mode_off);
 
 	/* clear previous UBWC error */
 	SDE_REG_WRITE(c, SSPP_UBWC_ERROR_STATUS + idx, BIT(31));

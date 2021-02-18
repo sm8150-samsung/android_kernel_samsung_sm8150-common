@@ -561,6 +561,7 @@ static int sde_rsc_mode2_entry(struct sde_rsc_priv *rsc)
 		pr_err("mdss gdsc power down failed, instruction:0x%x, rc:%d\n",
 				reg, rc);
 		SDE_EVT32(rc, reg, SDE_EVTLOG_ERROR);
+		SDE_DBG_DUMP_CLK_EN("sde","sde_rsc_drv", "sde_rsc_wrapper");
 
 		/* avoid touching f1 qtimer for last try */
 		if (i != MAX_MODE2_ENTRY_TRY)
@@ -657,8 +658,12 @@ static int sde_rsc_state_update(struct sde_rsc_priv *rsc,
 
 	case SDE_RSC_IDLE_STATE:
 		rc = sde_rsc_mode2_entry(rsc);
-		if (rc)
+		if (rc) {
 			pr_err("power collapse - mode 2 entry failed\n");
+			SDE_DBG_DUMP_CLK_EN("sde","sde_rsc_drv",
+				"sde_rsc_wrapper",
+				"panic");
+		}
 		else
 			rsc->power_collapse = true;
 		break;

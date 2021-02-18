@@ -26,6 +26,10 @@
 #include "dp_display.h"
 #include <soc/qcom/msm_dp_mst_sim_helper.h>
 
+#ifdef CONFIG_SEC_DISPLAYPORT
+#include "secdp.h"
+#endif
+
 #define DEBUG_NAME "drm_dp"
 
 struct dp_debug_private {

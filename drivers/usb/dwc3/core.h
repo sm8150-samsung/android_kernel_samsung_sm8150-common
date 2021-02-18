@@ -36,6 +36,13 @@
 #include <linux/ulpi/interface.h>
 
 #include <linux/phy/phy.h>
+#ifdef CONFIG_USB_CHARGING_EVENT
+#if defined(CONFIG_BATTERY_SAMSUNG_LEGO_STYLE)
+#include "../../battery/common/include/sec_charging_common.h"
+#else
+#include "../../battery_v2/include/sec_charging_common.h"
+#endif
+#endif
 
 #define DWC3_MSG_MAX	500
 
@@ -1225,6 +1232,10 @@ struct dwc3 {
 	 * reset-resume on PM restore.
 	 */
 	bool			ignore_wakeup_src_in_hostmode;
+#if IS_ENABLED(CONFIG_USB_CHARGING_EVENT)
+	struct work_struct      set_vbus_current_work;
+	int			vbus_current; /* 0 : 100mA, 1 : 500mA, 2: 900mA */
+#endif
 	int			retries_on_error;
 	ktime_t			last_run_stop;
 	u32			num_gsi_eps;

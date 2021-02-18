@@ -53,6 +53,10 @@
 #define CREATE_TRACE_POINTS
 #include "sde_trace.h"
 
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+#include <linux/sec_debug.h>
+#endif
+
 /* defines for secure channel call */
 #define MEM_PROTECT_SD_CTRL_SWITCH 0x18
 #define MDP_DEVICE_ID            0x1A
@@ -833,13 +837,21 @@ static int _sde_kms_release_splash_buffer(unsigned int mem_addr,
 		return -EINVAL;
 	}
 
+#if defined(CONFIG_DISPLAY_SAMSUNG) && defined(CONFIG_SEC_DEBUG)
+	if (sec_debug_is_enabled()) {
+		pr_info("skip to free splash memory\n");
+		return 0;
+	}
+#endif
+
+#if !defined(CONFIG_DISPLAY_SAMSUNG)
 	/* leave ramdump memory only if base address matches */
 	if (ramdump_base == mem_addr &&
 			ramdump_buffer_size <= splash_buffer_size) {
 		mem_addr +=  ramdump_buffer_size;
 		splash_buffer_size -= ramdump_buffer_size;
 	}
-
+#endif
 	pfn_start = mem_addr >> PAGE_SHIFT;
 	pfn_end = (mem_addr + splash_buffer_size) >> PAGE_SHIFT;
 
@@ -848,6 +860,7 @@ static int _sde_kms_release_splash_buffer(unsigned int mem_addr,
 		SDE_ERROR("continuous splash memory free failed:%d\n", ret);
 		return ret;
 	}
+	free_memsize_reserved(mem_addr, splash_buffer_size);
 	for (pfn_idx = pfn_start; pfn_idx < pfn_end; pfn_idx++)
 		free_reserved_page(pfn_to_page(pfn_idx));
 
@@ -1362,6 +1375,8 @@ static void _sde_kms_release_displays(struct sde_kms *sde_kms)
 	sde_kms->dsi_displays = NULL;
 	sde_kms->dsi_display_count = 0;
 }
+
+// KR :  No sde_kms_check_status_init ??
 
 /**
  * _sde_kms_setup_displays - create encoders, bridges and connectors
@@ -2696,7 +2711,7 @@ static int sde_kms_get_mixer_count(const struct msm_kms *kms,
 			mode->hdisplay > max_mixer_width) {
 		*num_lm = 2;
 		if ((mode_clock_hz >> 1) > max_mdp_clock_hz) {
-			SDE_DEBUG("[%s] clock %d exceeds max_mdp_clk %d\n",
+			SDE_ERROR("[%s] clock %d exceeds max_mdp_clk %d\n",
 					mode->name, mode_clock_hz,
 					max_mdp_clock_hz);
 			return -EINVAL;
@@ -2971,8 +2986,10 @@ retry:
 			drm_modeset_backoff(&ctx);
 		}
 
-		if (ret < 0)
+		if (ret < 0) {
 			DRM_ERROR("failed to restore state, %d\n", ret);
+			SDE_DBG_DUMP("all", "dbg_bus", "vbif_dbg_bus", "panic");
+		}
 
 		drm_atomic_state_put(sde_kms->suspend_state);
 		sde_kms->suspend_state = NULL;
@@ -2987,6 +3004,11 @@ end:
 
 	return 0;
 }
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+extern int ss_dsi_panel_event_handler(
+		int display_ndx, enum mdss_intf_events event, void *arg);
+#endif
 
 static const struct msm_kms_funcs kms_funcs = {
 	.hw_init         = sde_kms_hw_init,
@@ -3018,6 +3040,10 @@ static const struct msm_kms_funcs kms_funcs = {
 	.postopen = _sde_kms_post_open,
 	.check_for_splash = sde_kms_check_for_splash,
 	.get_mixer_count = sde_kms_get_mixer_count,
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	.ss_callback	= ss_dsi_panel_event_handler,
+#endif
 };
 
 /* the caller api needs to turn on clock before calling it */

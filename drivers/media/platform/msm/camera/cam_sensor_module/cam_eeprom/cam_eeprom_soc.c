@@ -126,6 +126,7 @@ int cam_eeprom_parse_dt_memory_map(struct device_node *node,
 	char      property[PROPERTY_MAXSIZE];
 	uint32_t  count = MSM_EEPROM_MEM_MAP_PROPERTIES_CNT;
 	struct    cam_eeprom_memory_map_t *map;
+	uint32_t  total_size = 0;
 
 	snprintf(property, PROPERTY_MAXSIZE, "num-blocks");
 	rc = of_property_read_u32(node, property, &data->num_map);
@@ -181,7 +182,20 @@ int cam_eeprom_parse_dt_memory_map(struct device_node *node,
 				rc);
 			goto ERROR;
 		}
-		data->num_data += map[i].mem.valid_size;
+		if (map[i].mem.data_type == 1)
+			data->num_data += map[i].mem.valid_size;
+	}
+	CAM_INFO(CAM_EEPROM, "valid size = %d", data->num_data);
+	// if total-size is defined at dtsi file.
+	// set num_data as total-size
+	snprintf(property, PROPERTY_MAXSIZE, "total-size");
+	rc = of_property_read_u32(node, property, &total_size);
+	CAM_ERR(CAM_EEPROM, "%s %d\n", property, total_size);
+	// if "total-size" propoerty exists.
+	if (rc >= 0) {
+		CAM_ERR(CAM_EEPROM, "set num_data as total-size (num_map : %d, total : %d, valid : %d)",
+			data->num_map, total_size, data->num_data);
+		data->num_data = total_size;
 	}
 
 	data->mapdata = vzalloc(data->num_data);
@@ -295,6 +309,8 @@ int cam_eeprom_parse_dt(struct cam_eeprom_ctrl_t *e_ctrl)
 		(struct cam_eeprom_soc_private *)e_ctrl->soc_info.soc_private;
 	uint32_t                        temp;
 
+	e_ctrl->is_multimodule_node = false;
+
 	if (!soc_info->dev) {
 		CAM_ERR(CAM_EEPROM, "Dev is NULL");
 		return -EINVAL;
@@ -308,13 +324,36 @@ int cam_eeprom_parse_dt(struct cam_eeprom_ctrl_t *e_ctrl)
 
 	of_node = soc_info->dev->of_node;
 
+	if (of_property_read_bool(of_node, "multimodule-support")) {
+		CAM_INFO(CAM_UTIL, "Multi Module is Supported");
+		e_ctrl->is_multimodule_node = true;
+	}
+
+	CAM_ERR(CAM_EEPROM, "VR:: MM Support %d",
+		e_ctrl->is_multimodule_node);
+
+	rc = of_property_read_u32(of_node, "cell-index",
+			&e_ctrl->soc_info.index);
+	CAM_INFO(CAM_EEPROM, "cell-index/subdev_id %d", e_ctrl->soc_info.index);
+	if (rc < 0) {
+		CAM_INFO(CAM_EEPROM, "kernel probe is not enabled");
+		//e_ctrl->userspace_probe = true;
+	}
+
+	of_node = soc_info->dev->of_node;
+
 	rc = of_property_read_string(of_node, "eeprom-name",
 		&soc_private->eeprom_name);
+
+	CAM_INFO(CAM_EEPROM, "eepromName: %s", soc_private->eeprom_name);
+
 	if (rc < 0) {
 		CAM_DBG(CAM_EEPROM, "kernel probe is not enabled");
 		e_ctrl->userspace_probe = true;
 	}
 
+	CAM_INFO(CAM_EEPROM, "VR:: Cell Index: %d Userspace_probe: %d",
+		e_ctrl->soc_info.index, e_ctrl->userspace_probe);
 	if (e_ctrl->io_master_info.master_type == CCI_MASTER) {
 		rc = of_property_read_u32(of_node, "cci-master",
 			&e_ctrl->cci_i2c_master);
@@ -346,8 +385,12 @@ int cam_eeprom_parse_dt(struct cam_eeprom_ctrl_t *e_ctrl)
 	if (rc < 0)
 		CAM_DBG(CAM_EEPROM, "failed: eeprom get dt data rc %d", rc);
 
+#if 1
+	if (e_ctrl->io_master_info.master_type != SPI_MASTER) {
+#else
 	if ((e_ctrl->userspace_probe == false) &&
-			(e_ctrl->io_master_info.master_type != SPI_MASTER)) {
+		(e_ctrl->io_master_info.master_type != SPI_MASTER)) {
+#endif
 		rc = of_property_read_u32(of_node, "slave-addr", &temp);
 		if (rc < 0)
 			CAM_DBG(CAM_EEPROM, "failed: no slave-addr rc %d", rc);

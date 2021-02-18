@@ -45,6 +45,10 @@
 #include <linux/slab.h>
 #include <linux/compat.h>
 
+#ifdef CONFIG_SEC_DEBUG
+#include <linux/sec_debug.h>
+#endif
+
 #include <linux/uaccess.h>
 #include <asm/unistd.h>
 #include <asm/div64.h>
@@ -516,8 +520,8 @@ static int calc_wheel_index(unsigned long expires, unsigned long clk)
 		 * Force expire obscene large timeouts to expire at the
 		 * capacity limit of the wheel.
 		 */
-		if (expires >= WHEEL_TIMEOUT_CUTOFF)
-			expires = WHEEL_TIMEOUT_MAX;
+		if (delta >= WHEEL_TIMEOUT_CUTOFF)
+			expires = clk + WHEEL_TIMEOUT_MAX;
 
 		idx = calc_index(expires, LVL_DEPTH - 1);
 	}
@@ -1298,7 +1302,13 @@ static void call_timer_fn(struct timer_list *timer, void (*fn)(unsigned long),
 	lock_map_acquire(&lockdep_map);
 
 	trace_timer_expire_entry(timer);
+#ifdef CONFIG_SEC_DEBUG_MSG_LOG
+	secdbg_msg("timer %pS entry", fn);
+#endif
 	fn(data);
+#ifdef CONFIG_SEC_DEBUG_MSG_LOG
+	secdbg_msg("timer %pS exit", fn);
+#endif
 	trace_timer_expire_exit(timer);
 
 	lock_map_release(&lockdep_map);

@@ -65,13 +65,15 @@ int32_t cam_eeprom_update_i2c_info(struct cam_eeprom_ctrl_t *e_ctrl,
 			return -EINVAL;
 		}
 		cci_client->cci_i2c_master = e_ctrl->cci_i2c_master;
-		cci_client->sid = (i2c_info->slave_addr) >> 1;
+		if (i2c_info->slave_addr > 0)
+			cci_client->sid = (i2c_info->slave_addr) >> 1;
 		cci_client->retries = 3;
 		cci_client->id_map = 0;
 		cci_client->i2c_freq_mode = i2c_info->i2c_freq_mode;
 	} else if (e_ctrl->io_master_info.master_type == I2C_MASTER) {
-		e_ctrl->io_master_info.client->addr = i2c_info->slave_addr;
-		CAM_DBG(CAM_EEPROM, "Slave addr: 0x%x", i2c_info->slave_addr);
+		if (i2c_info->slave_addr > 0)
+			e_ctrl->io_master_info.client->addr = i2c_info->slave_addr;
+		CAM_DBG(CAM_EEPROM, "Slave addr: 0x%x", e_ctrl->io_master_info.client->addr);
 	}
 	return 0;
 }
@@ -219,6 +221,7 @@ static int cam_eeprom_i2c_driver_probe(struct i2c_client *client,
 	e_ctrl->bridge_intf.ops.get_dev_info = NULL;
 	e_ctrl->bridge_intf.ops.link_setup = NULL;
 	e_ctrl->bridge_intf.ops.apply_req = NULL;
+	v4l2_set_subdevdata(&e_ctrl->v4l2_dev_str.sd, e_ctrl);
 	e_ctrl->cam_eeprom_state = CAM_EEPROM_INIT;
 
 	return rc;
@@ -256,17 +259,13 @@ static int cam_eeprom_i2c_driver_remove(struct i2c_client *client)
 		return -EINVAL;
 	}
 
-	CAM_INFO(CAM_EEPROM, "i2c driver remove invoked");
 	soc_info = &e_ctrl->soc_info;
 	for (i = 0; i < soc_info->num_clk; i++)
 		devm_clk_put(soc_info->dev, soc_info->clk[i]);
 
-	mutex_lock(&(e_ctrl->eeprom_mutex));
-	cam_eeprom_shutdown(e_ctrl);
-	mutex_unlock(&(e_ctrl->eeprom_mutex));
 	mutex_destroy(&(e_ctrl->eeprom_mutex));
-	cam_unregister_subdev(&(e_ctrl->v4l2_dev_str));
 	kfree(soc_private);
+	kfree(e_ctrl->io_master_info.cci_client);
 	v4l2_set_subdevdata(&e_ctrl->v4l2_dev_str.sd, NULL);
 	kfree(e_ctrl);
 
@@ -391,21 +390,14 @@ static int cam_eeprom_spi_driver_remove(struct spi_device *sdev)
 	for (i = 0; i < soc_info->num_clk; i++)
 		devm_clk_put(soc_info->dev, soc_info->clk[i]);
 
-	mutex_lock(&(e_ctrl->eeprom_mutex));
-	cam_eeprom_shutdown(e_ctrl);
-	mutex_unlock(&(e_ctrl->eeprom_mutex));
-	mutex_destroy(&(e_ctrl->eeprom_mutex));
-	cam_unregister_subdev(&(e_ctrl->v4l2_dev_str));
 	kfree(e_ctrl->io_master_info.spi_client);
-	e_ctrl->io_master_info.spi_client = NULL;
 	soc_private =
 		(struct cam_eeprom_soc_private *)e_ctrl->soc_info.soc_private;
 	if (soc_private) {
 		kfree(soc_private->power_info.gpio_num_info);
-		soc_private->power_info.gpio_num_info = NULL;
 		kfree(soc_private);
-		soc_private = NULL;
 	}
+	mutex_destroy(&(e_ctrl->eeprom_mutex));
 	v4l2_set_subdevdata(&e_ctrl->v4l2_dev_str.sd, NULL);
 	kfree(e_ctrl);
 
@@ -469,7 +461,10 @@ static int32_t cam_eeprom_platform_driver_probe(
 	e_ctrl->bridge_intf.ops.get_dev_info = NULL;
 	e_ctrl->bridge_intf.ops.link_setup = NULL;
 	e_ctrl->bridge_intf.ops.apply_req = NULL;
+
 	platform_set_drvdata(pdev, e_ctrl);
+	v4l2_set_subdevdata(&e_ctrl->v4l2_dev_str.sd, e_ctrl);
+
 	e_ctrl->cam_eeprom_state = CAM_EEPROM_INIT;
 
 	return rc;
@@ -479,7 +474,6 @@ free_cci_client:
 	kfree(e_ctrl->io_master_info.cci_client);
 free_e_ctrl:
 	kfree(e_ctrl);
-
 	return rc;
 }
 
@@ -495,23 +489,17 @@ static int cam_eeprom_platform_driver_remove(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	CAM_INFO(CAM_EEPROM, "Platform driver remove invoked");
 	soc_info = &e_ctrl->soc_info;
 
 	for (i = 0; i < soc_info->num_clk; i++)
 		devm_clk_put(soc_info->dev, soc_info->clk[i]);
 
-	mutex_lock(&(e_ctrl->eeprom_mutex));
-	cam_eeprom_shutdown(e_ctrl);
-	mutex_unlock(&(e_ctrl->eeprom_mutex));
 	mutex_destroy(&(e_ctrl->eeprom_mutex));
-	cam_unregister_subdev(&(e_ctrl->v4l2_dev_str));
 	kfree(soc_info->soc_private);
 	kfree(e_ctrl->io_master_info.cci_client);
 	platform_set_drvdata(pdev, NULL);
 	v4l2_set_subdevdata(&e_ctrl->v4l2_dev_str.sd, NULL);
 	kfree(e_ctrl);
-
 	return 0;
 }
 
@@ -545,6 +533,8 @@ static struct i2c_driver cam_eeprom_i2c_driver = {
 	.remove = cam_eeprom_i2c_driver_remove,
 	.driver = {
 		.name = "msm_eeprom",
+		.owner = THIS_MODULE,
+		.of_match_table = cam_eeprom_dt_match,
 	},
 };
 

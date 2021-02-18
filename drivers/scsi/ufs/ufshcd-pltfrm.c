@@ -488,7 +488,9 @@ int ufshcd_pltfrm_init(struct platform_device *pdev,
 {
 	struct ufs_hba *hba;
 	void __iomem *mmio_base;
+	void __iomem *phy_base;
 	struct resource *mem_res;
+	struct resource *phy_res;
 	int irq, err;
 	struct device *dev = &pdev->dev;
 
@@ -496,6 +498,15 @@ int ufshcd_pltfrm_init(struct platform_device *pdev,
 	mmio_base = devm_ioremap_resource(dev, mem_res);
 	if (IS_ERR(mmio_base)) {
 		err = PTR_ERR(mmio_base);
+		goto out;
+	}
+
+	phy_res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "ufs_phy");
+	phy_base = devm_ioremap(&pdev->dev,
+			phy_res->start,
+			resource_size(phy_res));
+	if (IS_ERR(*(void **)&phy_base)) {
+		err = PTR_ERR(*(void **)&phy_base);
 		goto out;
 	}
 
@@ -559,6 +570,8 @@ int ufshcd_pltfrm_init(struct platform_device *pdev,
 	if (err) {
 		dev_err(dev, "Initialization failed\n");
 		goto dealloc_host;
+	} else {
+		hba->phy_base = phy_base;
 	}
 
 	platform_set_drvdata(pdev, hba);

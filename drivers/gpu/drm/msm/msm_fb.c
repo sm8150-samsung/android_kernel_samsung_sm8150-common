@@ -23,6 +23,7 @@
 #include "msm_drv.h"
 #include "msm_kms.h"
 #include "msm_gem.h"
+#include "sde_dbg.h"
 
 #define MSM_FRAMEBUFFER_FLAG_KMAP	BIT(0)
 
@@ -451,6 +452,7 @@ struct drm_framebuffer *msm_framebuffer_init(struct drm_device *dev,
 	}
 
 	DBG("create: FB ID: %d (%pK)", fb->base.id, fb);
+	SDE_EVT32(msm_fb->planes[0]->dma_buf, fb->base.id);
 
 	return fb;
 

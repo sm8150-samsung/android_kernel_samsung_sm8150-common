@@ -30,6 +30,7 @@
 #include <linux/mmc/slot-gpio.h>
 
 #include "core.h"
+#include "crypto.h"
 #include "host.h"
 #include "slot-gpio.h"
 #include "pwrseq.h"
@@ -478,6 +479,16 @@ int mmc_retune(struct mmc_host *host)
 			host->ops->prepare_hs400_tuning(host, &host->ios);
 	}
 
+	/*
+	 * Timing should be adjusted to the HS400 target
+	 * operation frequency for tuning process.
+	 * Similar handling is also done in mmc_hs200_tuning()
+	 * This is handled properly in sdhci-msm.c from msm-5.4 onwards.
+	 */
+	if (host->card->mmc_avail_type & EXT_CSD_CARD_TYPE_HS400 &&
+		host->ios.bus_width == MMC_BUS_WIDTH_8)
+		mmc_set_timing(host, MMC_TIMING_MMC_HS400);
+
 	err = mmc_execute_tuning(host->card);
 	if (err)
 		goto out;
@@ -713,6 +724,10 @@ struct mmc_host *mmc_alloc_host(int extra, struct device *dev)
 
 	spin_lock_init(&host->lock);
 	init_waitqueue_head(&host->wq);
+	host->wlock_name = kasprintf(GFP_KERNEL,
+			"%s_detect", mmc_hostname(host));
+	wake_lock_init(&host->detect_wake_lock, WAKE_LOCK_SUSPEND,
+			host->wlock_name);
 	INIT_DELAYED_WORK(&host->detect, mmc_rescan);
 	INIT_DELAYED_WORK(&host->sdio_irq_work, sdio_irq_work);
 	setup_timer(&host->retune_timer, mmc_retune_timer, (unsigned long)host);
@@ -1047,7 +1062,9 @@ EXPORT_SYMBOL(mmc_remove_host);
  */
 void mmc_free_host(struct mmc_host *host)
 {
+	mmc_crypto_free_host(host);
 	mmc_pwrseq_free(host);
+	wake_lock_destroy(&host->detect_wake_lock);
 	put_device(&host->class_dev);
 }
 

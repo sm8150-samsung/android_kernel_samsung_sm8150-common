@@ -323,7 +323,8 @@ static int32_t cam_qup_i2c_write(struct camera_io_master *client,
 		CAM_ERR(CAM_SENSOR, "failed rc: %d", rc);
 
 deallocate_buffer:
-	kfree(buf);
+	if (buf)
+		kfree(buf);
 	return rc;
 }
 

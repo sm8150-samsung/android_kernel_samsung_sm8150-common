@@ -986,6 +986,7 @@ config QCOM_CX_IPEAK
 
 config QCOM_AOP_DDR_MESSAGING
 	bool "Send messages to AOP about the DDR frequency during reboot"
+	default n
 	help
 	  This driver sends messages to the AOP to adjust the DDR frequency when
 	  the device is rebooting, to ensure that the device is powered off

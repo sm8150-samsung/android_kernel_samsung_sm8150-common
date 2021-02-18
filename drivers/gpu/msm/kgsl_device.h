@@ -438,7 +438,7 @@ struct kgsl_context {
  */
 
 #define pr_context(_d, _c, fmt, args...) \
-		dev_err((_d)->dev, "%s[%d]: " fmt, \
+		dev_err_ratelimited((_d)->dev, "%s[%d]: " fmt, \
 		_context_comm((_c)), \
 		(_c)->proc_priv->pid, ##args)
 

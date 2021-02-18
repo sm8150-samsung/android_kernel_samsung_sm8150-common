@@ -660,6 +660,7 @@ struct sdhci_host {
 	int reset_wa_applied; /* reset workaround status */
 	ktime_t reset_wa_t; /* time when the reset workaround is applied */
 	int reset_wa_cnt; /* total number of times workaround is used */
+	bool restore_now;
 
 	unsigned long private[0] ____cacheline_aligned;
 };

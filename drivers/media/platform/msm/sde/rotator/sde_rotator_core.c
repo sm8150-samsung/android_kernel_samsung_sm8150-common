@@ -41,7 +41,6 @@
 #include "sde_rotator_trace.h"
 #include "sde_rotator_debug.h"
 
-
 /* Rotator device id to be used in SCM call */
 #define SDE_ROTATOR_DEVICE	21
 
@@ -3172,6 +3171,7 @@ int sde_rotator_core_init(struct sde_rot_mgr **pmgr,
 			SDE_MDP_HW_REV_620)) {
 		mgr->ops_hw_init = sde_rotator_r3_init;
 		mgr->min_rot_clk = ROT_MIN_ROT_CLK;
+		mgr->max_rot_clk = ROT_R3_MAX_ROT_CLK;
 
 		/*
 		 * on platforms where the maxlinewidth is greater than

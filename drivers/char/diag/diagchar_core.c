@@ -1309,6 +1309,34 @@ static int mask_request_validate(unsigned char mask_buf[], int len)
 	return 0;
 }
 
+static void diag_md_session_dump(void)
+{
+      struct diag_md_session_t *session_info;
+      int i, j;
+
+      for (i = 0; i < NUM_DIAG_MD_DEV; i++) {
+	      for (j = 0; j < NUM_MD_SESSIONS; j++) {
+			session_info = driver->md_session_map[i][j];
+
+            if (!session_info)
+				continue;
+
+            if (session_info->task) {
+				DIAG_LOG(DIAG_DEBUG_USERSPACE, "diag: md dev : %d md session %d : "
+				 "pid : %d, task info [%s : pid %d tgid %d]\n",
+					i, j, session_info->pid,
+					session_info->task->comm,
+					session_info->task->pid,
+					session_info->task->tgid);
+            } else {
+				DIAG_LOG(DIAG_DEBUG_USERSPACE, "diag: md dev : %d md session %d : "
+				 "pid : %d, no task info\n",
+					i, j, session_info->pid);
+            }
+	      }
+	  }
+}
+
 static void diag_md_session_init(void)
 {
 	int i, proc;
@@ -1357,6 +1385,9 @@ int diag_md_session_create(int mode, int peripheral_mask, int proc)
 	int i;
 	int err = 0;
 	struct diag_md_session_t *new_session = NULL;
+
+	DIAG_LOG(DIAG_DEBUG_USERSPACE, "current task: %s [%d:%d]\n",
+				current->comm, current->pid, current->tgid);
 
 	/*
 	 * If a session is running with a peripheral mask and a new session
@@ -1441,6 +1472,7 @@ int diag_md_session_create(int mode, int peripheral_mask, int proc)
 	mutex_unlock(&driver->md_session_lock);
 	DIAG_LOG(DIAG_DEBUG_USERSPACE,
 		 "created session in peripheral mode\n");
+        diag_md_session_dump();
 	return 0;
 
 fail_peripheral:
@@ -1466,6 +1498,9 @@ static void diag_md_session_close(int pid)
 	uint8_t found = 0;
 	struct diag_md_session_t *session_info = NULL;
 	int proc;
+
+	DIAG_LOG(DIAG_DEBUG_USERSPACE,"current task: %s [%d:%d]\n",
+				current->comm, current->pid, current->tgid);
 
 	session_info = diag_md_session_get_pid(pid);
 	if (!session_info)
@@ -1505,6 +1540,7 @@ static void diag_md_session_close(int pid)
 	kfree(session_info);
 	session_info = NULL;
 	DIAG_LOG(DIAG_DEBUG_USERSPACE, "cleared up session\n");
+        diag_md_session_dump();
 }
 
 struct diag_md_session_t *diag_md_session_get_pid(int pid)
@@ -1522,6 +1558,12 @@ struct diag_md_session_t *diag_md_session_get_pid(int pid)
 				return driver->md_session_map[proc][i];
 		}
 	}
+	DIAG_LOG(DIAG_DEBUG_USERSPACE, "diag: no matching session : call "
+				"from: %pS: current task: %s [%d:%d]\n",
+				 __builtin_return_address(0),
+				 current->comm, current->pid, current->tgid);
+        diag_md_session_dump();
+
 	return NULL;
 }
 
@@ -1968,7 +2010,7 @@ static int diag_switch_logging(struct diag_logging_mode_param_t *param)
 				DIAG_LOG(DIAG_DEBUG_USERSPACE,
 					 "not switching modes c: %d n: %d\n",
 					curr_mode, new_mode);
-				return 0;
+				continue;
 			}
 
 			diag_ws_reset(DIAG_WS_MUX);

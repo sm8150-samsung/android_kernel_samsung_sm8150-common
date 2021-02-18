@@ -90,8 +90,11 @@ struct file *anon_inode_getfile(const char *name,
 	this.len = strlen(name);
 	this.hash = 0;
 	path.dentry = d_alloc_pseudo(anon_inode_mnt->mnt_sb, &this);
-	if (!path.dentry)
+	if (!path.dentry) {
+		if (!strncmp(name, "sync_file", strlen("sync_file")))
+			pr_err("%s: d_alloc_pseudo failed\n", __func__);
 		goto err_module;
+	}
 
 	path.mnt = mntget(anon_inode_mnt);
 	/*
@@ -103,8 +106,12 @@ struct file *anon_inode_getfile(const char *name,
 	d_instantiate(path.dentry, anon_inode_inode);
 
 	file = alloc_file(&path, OPEN_FMODE(flags), fops);
-	if (IS_ERR(file))
+	if (IS_ERR(file)) {
+		if (!strncmp(name, "sync_file", strlen("sync_file")))
+			pr_err("%s: alloc_file failed : %d\n", __func__,
+				PTR_ERR(file));
 		goto err_dput;
+	}
 	file->f_mapping = anon_inode_inode->i_mapping;
 
 	file->f_flags = flags & (O_ACCMODE | O_NONBLOCK);

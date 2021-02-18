@@ -53,6 +53,14 @@
 #include <asm/sysreg.h>
 #include <trace/events/exception.h>
 
+#ifdef CONFIG_SEC_DEBUG
+#include <linux/sec_debug.h>
+#endif
+
+#ifdef CONFIG_RKP_CFP_ROPP
+#include <linux/rkp_cfp.h>
+#endif
+
 static const char *handler[]= {
 	"Synchronous Abort",
 	"IRQ",
@@ -108,6 +116,13 @@ void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 	unsigned long cur_sp = 0;
 	unsigned long cur_fp = 0;
 
+#if (defined CONFIG_RKP_CFP_ROPP) && (defined CONFIG_RKP_CFP_TEST)
+	unsigned long value = 0x0;
+#endif
+#ifdef CONFIG_SEC_DEBUG
+	unsigned long prev_fp = 0;
+#endif
+
 	pr_debug("%s(regs = %p tsk = %p)\n", __func__, regs, tsk);
 
 	if (regs) {
@@ -121,6 +136,11 @@ void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 
 	if (!try_get_task_stack(tsk))
 		return;
+
+#if (defined CONFIG_RKP_CFP_ROPP) && (defined CONFIG_RKP_CFP_TEST)
+	asm volatile("mrs %0, "STR(RRMK)"\n\t" : "=r" (value));
+	printk("CFP_TEST MK= %lx RRK=%lx RRK^MK=%lx\n", value, task_thread_info(tsk)->rrk, task_thread_info(tsk)->rrk ^ value);
+#endif
 
 	if (tsk == current) {
 		frame.fp = (unsigned long)__builtin_frame_address(0);
@@ -172,6 +192,20 @@ void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 			 */
 			dump_backtrace_entry(regs->pc);
 		}
+
+#ifdef CONFIG_SEC_DEBUG
+		if (prev_fp >= frame.fp) {
+			if (on_accessible_stack(tsk, frame.fp)) {
+				printk("FP looks invalid : "
+					"0x%016lx state(0x%016lx) "
+					"on_cpu(%d)@cpu%u\n",
+					frame.fp, tsk->state,
+					tsk->on_cpu, tsk->cpu);
+			}
+			break;
+		}
+		prev_fp = frame.fp;
+#endif
 	} while (!unwind_frame(tsk, &frame));
 
 	put_task_stack(tsk);
@@ -210,8 +244,19 @@ static int __die(const char *str, int err, struct pt_regs *regs)
 		 end_of_stack(tsk));
 	show_regs(regs);
 
-	if (!user_mode(regs))
+	if (!user_mode(regs)) {
+#if 0 //#ifdef CONFIG_SEC_DEBUG
+		if (THREAD_SIZE + (unsigned long)task_stack_page(tsk) - regs->sp
+			> THREAD_SIZE) {
+			dump_mem(KERN_EMERG, "Stack: ", regs->sp,
+					THREAD_SIZE / 4 + regs->sp);
+		} else {
+			dump_mem(KERN_EMERG, "Stack: ", regs->sp, THREAD_SIZE
+					+ (unsigned long)task_stack_page(tsk));
+		}
+#endif
 		dump_instr(KERN_EMERG, regs);
+	}
 
 	return ret;
 }
@@ -229,6 +274,9 @@ void die(const char *str, struct pt_regs *regs, int err)
 	raw_spin_lock_irqsave(&die_lock, flags);
 
 	oops_enter();
+
+	sec_debug_sched_msg("!!die!!");
+	sec_debug_summary_save_die_info(str, regs);
 
 	console_verbose();
 	bust_spinlocks(1);
@@ -737,6 +785,9 @@ const char *esr_get_class_string(u32 esr)
 asmlinkage void bad_mode(struct pt_regs *regs, int reason, unsigned int esr)
 {
 	console_verbose();
+
+	sec_debug_save_badmode_info(reason, handler[reason],
+			esr, esr_get_class_string(esr));
 
 	pr_crit("Bad mode in %s handler detected on CPU%d, code 0x%08x -- %s\n",
 		handler[reason], smp_processor_id(), esr,

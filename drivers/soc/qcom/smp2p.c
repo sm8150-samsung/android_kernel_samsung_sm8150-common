@@ -447,6 +447,9 @@ static int smp2p_update_bits(void *data, u32 mask, u32 value)
 	SMP2P_INFO("%d: %s: orig:0x%0x new:0x%0x\n",
 		   entry->smp2p->remote_pid, entry->name, orig, val);
 
+	SMP2P_INFO("%d: %s: mask:%0x val:%0x\n",
+			entry->smp2p->remote_pid, entry->name, mask, value);
+			   
 	if (val != orig)
 		qcom_smp2p_kick(entry->smp2p);
 

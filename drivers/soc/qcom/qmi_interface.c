@@ -19,6 +19,7 @@
 #include <linux/net.h>
 #include <linux/completion.h>
 #include <linux/idr.h>
+#include <linux/ipc_logging.h>
 #include <linux/string.h>
 #include <net/sock.h>
 #include <linux/workqueue.h>
@@ -26,6 +27,11 @@
 
 static struct socket *qmi_sock_create(struct qmi_handle *qmi,
 				      struct sockaddr_qrtr *sq);
+
+static void *qmi_txn_ilc;
+#define QMI_INFO(x, ...) \
+	if (qmi_txn_ilc) \
+		ipc_log_string(qmi_txn_ilc, x, ##__VA_ARGS__)
 
 /**
  * qmi_recv_new_server() - handler of NEW_SERVER control message
@@ -328,6 +334,7 @@ int qmi_txn_init(struct qmi_handle *qmi, struct qmi_txn *txn,
 		pr_err("failed to allocate transaction id\n");
 
 	txn->id = ret;
+	QMI_INFO("%s [%d:%s] qmi[%p] txn[%p] id[%d]\n", __func__, current->pid, current->comm, qmi, txn, txn->id); 
 	mutex_unlock(&qmi->txn_lock);
 
 	return ret;
@@ -350,13 +357,16 @@ int qmi_txn_wait(struct qmi_txn *txn, unsigned long timeout)
 	struct qmi_handle *qmi = txn->qmi;
 	int ret;
 
+	QMI_INFO("%s [%d:%s] before wait qmi[%p] txn[%p] id[%d]\n", __func__, current->pid, current->comm, qmi, txn, txn->id); 
 	ret = wait_for_completion_timeout(&txn->completion, timeout);
 
 	if (txn->result == -ENETRESET) {
+		QMI_INFO("%s [%d:%s] after wait -ENETRESET qmi[%p] txn[%p] id[%d]\n", __func__, current->pid, current->comm, qmi, txn, txn->id); 
 		return txn->result;
 	}
 
 	mutex_lock(&qmi->txn_lock);
+	QMI_INFO("%s [%d:%s] After wait REMOVE qmi[%p] txn[%p] id[%d]\n", __func__, current->pid, current->comm, qmi, txn, txn->id); 
 	idr_remove(&qmi->txns, txn->id);
 	mutex_unlock(&qmi->txn_lock);
 
@@ -376,6 +386,7 @@ void qmi_txn_cancel(struct qmi_txn *txn)
 	struct qmi_handle *qmi = txn->qmi;
 
 	mutex_lock(&qmi->txn_lock);
+	QMI_INFO("%s [%d:%s] qmi[%p] txn[%p] id[%d]\n", __func__, current->pid, current->comm, qmi, txn, txn->id); 
 	idr_remove(&qmi->txns, txn->id);
 	mutex_unlock(&qmi->txn_lock);
 }
@@ -685,6 +696,9 @@ int qmi_handle_init(struct qmi_handle *qmi, size_t recv_buf_size,
 		goto err_destroy_wq;
 	}
 
+	if (!qmi_txn_ilc) {
+		qmi_txn_ilc = ipc_log_context_create(20, "qmi_txns", 0);
+	}
 	return 0;
 
 err_destroy_wq:
@@ -726,6 +740,7 @@ void qmi_handle_release(struct qmi_handle *qmi)
 
 	mutex_lock(&qmi->txn_lock);
 	idr_for_each_entry(&qmi->txns, txn, txn_id) {
+		QMI_INFO("%s [%d:%s] qmi[%p] txn[%p] id[%d]\n", __func__, current->pid, current->comm, qmi, txn, txn->id); 
 		idr_remove(&qmi->txns, txn->id);
 		txn->result = -ENETRESET;
 		complete(&txn->completion);

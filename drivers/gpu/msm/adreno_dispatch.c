@@ -2150,6 +2150,39 @@ static int dispatcher_do_fault(struct adreno_device *adreno_dev)
 	if (GMU_DEV_OP_VALID(gmu_dev_ops, gx_is_on))
 		gx_on = gmu_dev_ops->gx_is_on(adreno_dev);
 
+	if (gx_on) {
+		unsigned int sctlr, actlr, ttbcr, mair0, mair1, fsr;
+		unsigned int fsynr0, fsynr1, tlbstatus;
+		uint64_t far, ipafar;
+		struct kgsl_iommu_context *ctx;
+		struct kgsl_iommu *iommu;
+		struct kgsl_mmu *mmu = &device->mmu;
+
+		iommu = &mmu->priv.iommu;
+		ctx = &iommu->ctx[KGSL_IOMMU_CONTEXT_USER];
+
+				 sctlr = KGSL_IOMMU_GET_CTX_REG(ctx, SCTLR);
+				 actlr = KGSL_IOMMU_GET_CTX_REG(ctx, ACTLR);
+				 ttbcr = KGSL_IOMMU_GET_CTX_REG(ctx, TTBCR);
+				 mair0 = KGSL_IOMMU_GET_CTX_REG(ctx, MAIR0);
+				 mair1 = KGSL_IOMMU_GET_CTX_REG(ctx, MAIR1);
+				 fsr = KGSL_IOMMU_GET_CTX_REG(ctx, FSR);
+				 fsynr0 = KGSL_IOMMU_GET_CTX_REG(ctx, FSYNR0);
+				 fsynr1 = KGSL_IOMMU_GET_CTX_REG(ctx, FSYNR1);
+				 tlbstatus = KGSL_IOMMU_GET_CTX_REG(ctx, TLBSTATUS);
+
+				 far = KGSL_IOMMU_GET_CTX_REG_Q(ctx, FAR);
+				 ipafar = KGSL_IOMMU_GET_CTX_REG_Q(ctx, IPAFAR);
+
+				 dev_err_ratelimited(device->dev, "[sctlr] 0x%08x\n[actlr] 0x%08x\n[ttbcr] 0x%08x\n[mair0] 0x%08x\n[mair1] 0x%08x\n[fsr] 0x%08x\n[fsynr0] 0x%08x\n[fsynr1] 0x%08x\n[tlbstat] 0x%08x\n",
+						 sctlr, actlr, ttbcr, mair0, mair1, fsr, fsynr0,
+						 fsynr1, tlbstatus);
+
+		dev_err_ratelimited(device->dev, "[far] 0x%016lx\n[ipafar] 0x%016lx\n",
+						 (unsigned long)far,
+						 (unsigned long)ipafar);
+	}
+
 
 	/*
 	 * On A5xx and A6xx, read RBBM_STATUS3:SMMU_STALLED_ON_FAULT (BIT 24)
@@ -2165,6 +2198,7 @@ static int dispatcher_do_fault(struct adreno_device *adreno_dev)
 		adreno_readreg(adreno_dev, ADRENO_REG_RBBM_STATUS3, &val);
 		if (val & BIT(24)) {
 			mutex_unlock(&device->mutex);
+			WARN(1, "MMU is stuck %x\n", val);
 			return 0;
 		}
 	}

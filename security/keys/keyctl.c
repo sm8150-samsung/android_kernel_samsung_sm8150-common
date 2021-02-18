@@ -29,6 +29,12 @@
 #include <keys/request_key_auth-type.h>
 #include "internal.h"
 
+#ifdef CONFIG_KEYS_SUPPORT_STLOG
+#include <linux/fslog.h>
+#else
+#define ST_LOG(fmt,...)
+#endif
+
 #define KEY_MAX_DESC_SIZE 4096
 
 static int key_get_type_from_user(char *type,
@@ -131,12 +137,16 @@ SYSCALL_DEFINE5(add_key, const char __user *, _type,
 		ret = PTR_ERR(key_ref);
 	}
 
+	ST_LOG("<keyctl> add_key %s(%ld). type: %s, desc: %s\n",
+		(ret < 0)? "failed":"succeeded", (ret < 0)? ret:0, type,
+		description? description:"null");
+	printk(KERN_ERR "<keyctl> add_key %s(%ld). type: %s, desc: %s\n",
+		(ret < 0)? "failed":"succeeded", (ret < 0)? ret:0, type,
+		description? description:"null");
+
 	key_ref_put(keyring_ref);
  error3:
-	if (payload) {
-		memzero_explicit(payload, plen);
-		kvfree(payload);
-	}
+	kvfree_sensitive(payload, plen);
  error2:
 	kfree(description);
  error:
@@ -351,7 +361,7 @@ long keyctl_update_key(key_serial_t id,
 
 	key_ref_put(key_ref);
 error2:
-	__kvzfree(payload, plen);
+	kvfree_sensitive(payload, plen);
 error:
 	return ret;
 }
@@ -859,7 +869,7 @@ can_read_key:
 		 */
 		if (ret > key_data_len) {
 			if (unlikely(key_data))
-				__kvzfree(key_data, key_data_len);
+				kvfree_sensitive(key_data, key_data_len);
 			key_data_len = ret;
 			continue;	/* Allocate buffer */
 		}
@@ -868,7 +878,7 @@ can_read_key:
 			ret = -EFAULT;
 		break;
 	}
-	__kvzfree(key_data, key_data_len);
+	kvfree_sensitive(key_data, key_data_len);
 
 key_put_out:
 	key_put(key);
@@ -1170,10 +1180,7 @@ long keyctl_instantiate_key_common(key_serial_t id,
 		keyctl_change_reqkey_auth(NULL);
 
 error2:
-	if (payload) {
-		memzero_explicit(payload, plen);
-		kvfree(payload);
-	}
+	kvfree_sensitive(payload, plen);
 error:
 	return ret;
 }

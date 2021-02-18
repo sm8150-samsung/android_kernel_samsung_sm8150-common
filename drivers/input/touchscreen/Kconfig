@@ -1254,7 +1254,22 @@ config TOUCHSCREEN_ST
 
 	  If unsure, say N.
 
+config TOUCHSCREEN_DUAL_FOLDABLE
+	tristate "Dual TSP IC for Foldable"
+	depends on I2C
+	help
+	  This enables support for Dual TSP.
+
+source "drivers/input/touchscreen/sec_ts/y771/Kconfig"
+source "drivers/input/touchscreen/sec_ts/y771_d/Kconfig"
+source "drivers/input/touchscreen/sec_ts/y761_sub/Kconfig"
+source "drivers/input/touchscreen/sec_ts/y771_R5/Kconfig"
 source "drivers/input/touchscreen/st/Kconfig"
+source "drivers/input/touchscreen/zinitix/zt75xx/Kconfig"
+source "drivers/input/touchscreen/zinitix/ztw522/Kconfig"
+source "drivers/input/touchscreen/stm/fts9cu80f/Kconfig"
+source "drivers/input/touchscreen/stm/fts9cu80f_b/Kconfig"
+source "drivers/input/touchscreen/stm/fts1ba90a/Kconfig"
 
 config TOUCHSCREEN_HIMAX_CHIPSET
 	bool "Himax touchpanel CHIPSET"
@@ -1288,6 +1303,7 @@ config TOUCHSCREEN_SYNAPTICS_TCM
 
 source "drivers/input/touchscreen/synaptics_tcm/Kconfig"
 
+
 config TOUCHSCREEN_RAYDIUM_CHIPSET
 	bool "Raydium WT030 touchpanel CHIPSET"
 	depends on I2C
@@ -1296,4 +1312,6 @@ config TOUCHSCREEN_RAYDIUM_CHIPSET
 
 	  If unsure, say N.
 
+source "drivers/input/touchscreen/imagis/ist40xx/Kconfig"
+source "drivers/input/touchscreen/melfas/mss100/Kconfig"
 endif

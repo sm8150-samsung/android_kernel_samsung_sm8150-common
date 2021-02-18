@@ -572,7 +572,13 @@ static inline void *kvmalloc_array(size_t n, size_t size, gfp_t flags)
 }
 
 extern void kvfree(const void *addr);
+extern void kvfree_sensitive(const void *addr, size_t len);
 
+/*
+ * Mapcount of compound page as a whole, does not include mapped sub-pages.
+ *
+ * Must be called only for compound pages or any their tail sub-pages.
+ */
 static inline int compound_mapcount(struct page *page)
 {
 	VM_BUG_ON_PAGE(!PageCompound(page), page);
@@ -592,10 +598,16 @@ static inline void page_mapcount_reset(struct page *page)
 
 int __page_mapcount(struct page *page);
 
+/*
+ * Mapcount of 0-order page; when compound sub-page, includes
+ * compound_mapcount().
+ *
+ * Result is undefined for pages which cannot be mapped into userspace.
+ * For example SLAB or special types of pages. See function page_has_type().
+ * They use this place in struct page differently.
+ */
 static inline int page_mapcount(struct page *page)
 {
-	VM_BUG_ON_PAGE(PageSlab(page), page);
-
 	if (unlikely(PageCompound(page)))
 		return __page_mapcount(page);
 	return atomic_read(&page->_mapcount) + 1;
@@ -1528,6 +1540,10 @@ long get_user_pages_remote(struct task_struct *tsk, struct mm_struct *mm,
 long get_user_pages(unsigned long start, unsigned long nr_pages,
 			    unsigned int gup_flags, struct page **pages,
 			    struct vm_area_struct **vmas);
+long get_user_pages_foll_cma(struct task_struct *tsk, struct mm_struct *mm,
+		    unsigned long start, unsigned long nr_pages,
+		    int write, int force, struct page **pages,
+		    struct vm_area_struct **vmas);
 long get_user_pages_locked(unsigned long start, unsigned long nr_pages,
 		    unsigned int gup_flags, struct page **pages, int *locked);
 long get_user_pages_unlocked(unsigned long start, unsigned long nr_pages,
@@ -2207,6 +2223,17 @@ extern void zone_pcp_reset(struct zone *zone);
 extern int min_free_kbytes;
 extern int watermark_scale_factor;
 
+/* ion rbin heap.. */
+void wake_ion_rbin_heap_prereclaim(void);
+void wake_ion_rbin_heap_shrink(void);
+
+/* rbincache.c */
+int init_rbincache(unsigned long pfn, unsigned long nr_pages);
+extern unsigned long totalrbin_pages;
+extern atomic_t rbin_allocated_pages;
+extern atomic_t rbin_cached_pages;
+extern atomic_t rbin_pool_pages;
+
 /* nommu.c */
 extern atomic_long_t mmap_pages_allocated;
 extern int nommu_shrink_inode_mappings(struct inode *, size_t, size_t);
@@ -2410,8 +2437,9 @@ int __must_check write_one_page(struct page *page);
 void task_dirty_inc(struct task_struct *tsk);
 
 /* readahead.c */
-#define VM_MAX_READAHEAD	512	/* kbytes */
+#define VM_MAX_READAHEAD	128	/* kbytes */
 #define VM_MIN_READAHEAD	16	/* kbytes (includes current page) */
+extern int mmap_readaround_limit;
 
 int force_page_cache_readahead(struct address_space *mapping, struct file *filp,
 			pgoff_t offset, unsigned long nr_to_read);
@@ -2567,6 +2595,7 @@ static inline struct page *follow_page(struct vm_area_struct *vma,
 #define FOLL_REMOTE	0x2000	/* we are working on non-current tsk/mm */
 #define FOLL_COW	0x4000	/* internal GUP flag */
 #define FOLL_ANON	0x8000	/* don't do file mappings */
+#define FOLL_CMA	0x80000	/* migrate if the page is from cma pageblock */
 
 static inline int vm_fault_to_errno(int vm_fault, int foll_flags)
 {
@@ -2825,6 +2854,24 @@ void __init setup_nr_node_ids(void);
 #else
 static inline void setup_nr_node_ids(void) {}
 #endif
+
+enum memsize_kernel_type {
+	MEMSIZE_KERNEL_KERNEL = 0,
+	MEMSIZE_KERNEL_PAGING,
+	MEMSIZE_KERNEL_LOGBUF,
+	MEMSIZE_KERNEL_PIDHASH,
+	MEMSIZE_KERNEL_VFSHASH,
+	MEMSIZE_KERNEL_MM_INIT,
+	MEMSIZE_KERNEL_OTHERS,
+	MEMSIZE_KERNEL_STOP,
+};
+extern void set_memsize_reserved_name(const char *name);
+extern void unset_memsize_reserved_name(void);
+extern void set_memsize_kernel_type(enum memsize_kernel_type type);
+extern void free_memsize_reserved(phys_addr_t free_base, phys_addr_t free_size);
+extern void record_memsize_reserved(const char *name, phys_addr_t base,
+				    phys_addr_t size, bool nomap,
+				    bool reusable);
 
 extern int want_old_faultaround_pte;
 

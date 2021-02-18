@@ -27,8 +27,52 @@
 #include <linux/of_platform.h>
 #include <linux/pm_opp.h>
 #include <linux/regulator/consumer.h>
+#include <linux/msm-bus.h>
+#include <dt-bindings/msm/msm-bus-ids.h>
 
 #include "clk.h"
+
+#define MSM_BUS_VECTOR(_src, _dst, _ab, _ib)	\
+{						\
+	.src = _src,				\
+	.dst = _dst,				\
+	.ab = _ab,				\
+	.ib = _ib,				\
+}
+
+static struct msm_bus_vectors clk_debugfs_vectors[] = {
+	MSM_BUS_VECTOR(MSM_BUS_MASTER_AMPSS_M0,
+			MSM_BUS_SLAVE_CAMERA_CFG, 0, 0),
+	MSM_BUS_VECTOR(MSM_BUS_MASTER_AMPSS_M0,
+			MSM_BUS_SLAVE_VENUS_CFG, 0, 0),
+	MSM_BUS_VECTOR(MSM_BUS_MASTER_AMPSS_M0,
+			MSM_BUS_SLAVE_DISPLAY_CFG, 0, 0),
+	MSM_BUS_VECTOR(MSM_BUS_MASTER_AMPSS_M0,
+			MSM_BUS_SLAVE_CAMERA_CFG, 0, 1),
+	MSM_BUS_VECTOR(MSM_BUS_MASTER_AMPSS_M0,
+			MSM_BUS_SLAVE_VENUS_CFG, 0, 1),
+	MSM_BUS_VECTOR(MSM_BUS_MASTER_AMPSS_M0,
+			MSM_BUS_SLAVE_DISPLAY_CFG, 0, 1),
+};
+
+static struct msm_bus_paths clk_debugfs_usecases[] = {
+	{
+		.num_paths = 3,
+		.vectors = &clk_debugfs_vectors[0],
+	},
+	{
+		.num_paths = 3,
+		.vectors = &clk_debugfs_vectors[3],
+	}
+};
+
+static struct msm_bus_scale_pdata clk_debugfs_scale_table = {
+	.usecase = clk_debugfs_usecases,
+	.num_usecases = ARRAY_SIZE(clk_debugfs_usecases),
+	.name = "clk_debugfs",
+};
+
+static uint32_t clk_debugfs_bus_cl_id;
 
 #if defined(CONFIG_COMMON_CLK)
 
@@ -2047,6 +2091,7 @@ static void clk_cleanup_vdd_votes(void)
 		list_del_init(&core->rate_change_node);
 	}
 }
+
 static int clk_core_set_rate_nolock(struct clk_core *core,
 				    unsigned long req_rate)
 {
@@ -2689,7 +2734,7 @@ EXPORT_SYMBOL_GPL(clk_set_flags);
 
 static struct dentry *rootdir;
 static int inited = 0;
-static u32 debug_suspend;
+static u32 debug_suspend = 1;
 static DEFINE_MUTEX(clk_debug_lock);
 static HLIST_HEAD(clk_debug_list);
 
@@ -2796,11 +2841,13 @@ static int clk_summary_show(struct seq_file *s, void *data)
 	seq_puts(s, "-------------------------------------------------------------------------------\n");
 
 	clk_prepare_lock();
+	msm_bus_scale_client_update_request(clk_debugfs_bus_cl_id, 1);
 
 	for (; *lists; lists++)
 		hlist_for_each_entry(c, *lists, child_node)
 			clk_summary_show_subtree(s, c, 0);
 
+	msm_bus_scale_client_update_request(clk_debugfs_bus_cl_id, 0);
 	clk_prepare_unlock();
 
 	return 0;
@@ -2866,6 +2913,7 @@ static int clk_dump(struct seq_file *s, void *data)
 
 	seq_putc(s, '{');
 	clk_prepare_lock();
+	msm_bus_scale_client_update_request(clk_debugfs_bus_cl_id, 1);
 
 	for (; *lists; lists++) {
 		hlist_for_each_entry(c, *lists, child_node) {
@@ -2876,6 +2924,7 @@ static int clk_dump(struct seq_file *s, void *data)
 		}
 	}
 
+	msm_bus_scale_client_update_request(clk_debugfs_bus_cl_id, 0);
 	clk_prepare_unlock();
 
 	seq_puts(s, "}\n");
@@ -2994,30 +3043,47 @@ DEFINE_SIMPLE_ATTRIBUTE(clock_enable_fops, clock_debug_enable_get,
  * clock_debug_print_enabled_debug_suspend() - Print names of enabled clocks
  * during suspend.
  */
+#define MAX_BUF_SIZE 512
 static void clock_debug_print_enabled_debug_suspend(struct seq_file *s)
 {
 	struct clk_core *core;
+	struct clk *clk;
+	char *start = "";
+	char clk_buf[MAX_BUF_SIZE];
+	ssize_t len = 0;
 	int cnt = 0;
 
 	if (!mutex_trylock(&clk_debug_lock))
 		return;
 
-	clock_debug_output(s, 0, "Enabled clocks:\n");
+	clock_debug_output(s, 0, "Enabled clocks:");
 
 	hlist_for_each_entry(core, &clk_debug_list, debug_node) {
 		if (!core || !core->prepare_count)
 			continue;
 
-		if (core->vdd_class)
-			clock_debug_output(s, 0, " %s:%u:%u [%ld, %d]",
-					core->name, core->prepare_count,
-					core->enable_count, core->rate,
-					clk_find_vdd_level(core, core->rate));
+		start = "";
+		clk = core->hw->clk;
 
-		else
-			clock_debug_output(s, 0, " %s:%u:%u [%ld]",
-					core->name, core->prepare_count,
-					core->enable_count, core->rate);
+		len += sprintf(clk_buf + len, "\t");
+		do {
+			if (clk->core->vdd_class)
+				len += sprintf(clk_buf + len, "%s%s:%u:%u [%ld, %d]", start,
+						clk->core->name, clk->core->prepare_count,
+						clk->core->enable_count, clk->core->rate,
+						clk_find_vdd_level(clk->core, clk->core->rate));
+
+			else
+				len += sprintf(clk_buf + len, "%s%s:%u:%u [%ld]", start,
+						clk->core->name, clk->core->prepare_count,
+						clk->core->enable_count, clk->core->rate);
+
+			start = " -> ";
+		} while ((clk = clk_get_parent(clk)));
+
+		pr_info("%s\n", clk_buf);
+		clk_buf[0] = 0;
+		len = 0;
 		cnt++;
 	}
 
@@ -3131,12 +3197,14 @@ static int print_hw_show(struct seq_file *m, void *unused)
 	for (clk = c; clk; clk = clk->parent)
 		if (clk->ops->bus_vote)
 			clk->ops->bus_vote(clk->hw, true);
+	msm_bus_scale_client_update_request(clk_debugfs_bus_cl_id, 1);
 
 	clk_debug_print_hw(c, m);
 
 	for (clk = c; clk; clk = clk->parent)
 		if (clk->ops->bus_vote)
 			clk->ops->bus_vote(c->hw, false);
+	msm_bus_scale_client_update_request(clk_debugfs_bus_cl_id, 0);
 	clk_prepare_unlock();
 
 	return 0;
@@ -3516,6 +3584,12 @@ static int __init clk_debug_init(void)
 	mutex_lock(&clk_debug_lock);
 	hlist_for_each_entry(core, &clk_debug_list, debug_node)
 		clk_debug_create_one(core, rootdir);
+
+	clk_debugfs_bus_cl_id =
+		msm_bus_scale_register_client(&clk_debugfs_scale_table);
+
+	if (!clk_debugfs_bus_cl_id)
+		pr_err("Could not register for bw voting\n");
 
 	inited = 1;
 	mutex_unlock(&clk_debug_lock);

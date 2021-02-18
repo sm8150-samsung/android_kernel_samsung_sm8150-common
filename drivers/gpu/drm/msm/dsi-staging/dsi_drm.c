@@ -22,6 +22,9 @@
 #include "dsi_drm.h"
 #include "sde_trace.h"
 #include "sde_encoder.h"
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+#include "../samsung/ss_dsi_panel_common.h"
+#endif
 
 #define to_dsi_bridge(x)     container_of((x), struct dsi_bridge, base)
 #define to_dsi_state(x)      container_of((x), struct dsi_connector_state, base)
@@ -173,6 +176,9 @@ static void dsi_bridge_pre_enable(struct drm_bridge *bridge)
 	int rc = 0;
 	struct dsi_bridge *c_bridge = to_dsi_bridge(bridge);
 
+	// KR_TEMP
+	pr_err("%s ++\n", __func__);
+
 	if (!bridge) {
 		pr_err("Invalid params\n");
 		return;
@@ -224,6 +230,8 @@ static void dsi_bridge_pre_enable(struct drm_bridge *bridge)
 	if (rc)
 		pr_err("Continuous splash pipeline cleanup failed, rc=%d\n",
 									rc);
+	// KR_TEMP
+	pr_err("%s --\n", __func__);
 }
 
 static void dsi_bridge_enable(struct drm_bridge *bridge)
@@ -439,7 +447,12 @@ static bool dsi_bridge_mode_fixup(struct drm_bridge *bridge,
 			(!(dsi_mode.dsi_mode_flags & DSI_MODE_FLAG_DYN_CLK)) &&
 			(!crtc_state->active_changed ||
 			 display->is_cont_splash_enabled))
-			dsi_mode.dsi_mode_flags |= DSI_MODE_FLAG_DMS;
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+			if (display->panel->panel_initialized || display->is_cont_splash_enabled) {
+				dsi_mode.dsi_mode_flags |= DSI_MODE_FLAG_DMS;
+				pr_info("DMS : switch mode %s -> %s\n", (&cur_mode)->name, adjusted_mode->name);
+			}
+#endif
 
 		/* Reject seemless transition when active/connectors changed.*/
 		if ((crtc_state->active_changed ||
@@ -503,6 +516,7 @@ int dsi_conn_get_mode_info(struct drm_connector *connector,
 	if (!dsi_mode.priv_info)
 		return -EINVAL;
 
+	SDE_EVT32(mode_info,  ((unsigned long long)mode_info) >> 32, connector, ((unsigned long long)connector) >> 32, 0x9999);
 	memset(mode_info, 0, sizeof(*mode_info));
 
 	timing = &dsi_mode.timing;
@@ -533,6 +547,7 @@ int dsi_conn_get_mode_info(struct drm_connector *connector,
 			sizeof(dsi_mode.priv_info->roi_caps));
 	}
 
+	SDE_EVT32(dsi_mode.priv_info->dsc_enabled, mode_info->clk_rate, mode_info->frame_rate, 0x9999);
 	return 0;
 }
 

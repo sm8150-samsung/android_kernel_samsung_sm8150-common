@@ -907,9 +907,10 @@ static int geni_se_rmv_ab_ib(struct geni_se_device *geni_se_dev,
 
 	if (geni_se_dev->num_paths == 2) {
 		if (unlikely(list_empty(&rsc->ab_list_noc) ||
-					list_empty(&rsc->ib_list_noc)))
+					list_empty(&rsc->ib_list_noc))){
+			mutex_unlock(&geni_se_dev->geni_dev_lock);
 			return -EINVAL;
-
+		}
 		list_del_init(&rsc->ab_list_noc);
 		geni_se_dev->cur_ab_noc -= rsc->ab_noc;
 

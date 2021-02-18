@@ -25,6 +25,8 @@
  *
  */
 
+#define pr_fmt(fmt)	"[drm-dp] %s: " fmt, __func__
+
 #include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/slab.h>
@@ -39,12 +41,56 @@
 
 #include "drm_crtc_helper_internal.h"
 
+#ifdef CONFIG_SEC_DISPLAYPORT
+#include <linux/secdp_logger.h>
+#define DP_ENUM_STR(x)	#x
+
+#define IOCTL_MAGIC		't'
+#define IOCTL_MAXNR		30
+#define IOCTL_DP_AUXCMD_TYPE	_IO(IOCTL_MAGIC, 0)
+
+static inline char *auxdev_ioctl_cmd_to_string(u32 cmd)
+{
+	switch (cmd) {
+	case IOCTL_DP_AUXCMD_TYPE:
+		return DP_ENUM_STR(IOCTL_DP_AUXCMD_TYPE);
+	default:
+		return "unknown";
+	}
+}
+
+enum dp_auxcmd_type {
+	DP_AUXCMD_NATIVE,
+	DP_AUXCMD_I2C,
+};
+
+static inline char *auxcmd_type_to_string(u32 cmd_type)
+{
+	switch (cmd_type) {
+	case DP_AUXCMD_NATIVE:
+		return DP_ENUM_STR(DP_AUXCMD_NATIVE);
+	case DP_AUXCMD_I2C:
+		return DP_ENUM_STR(DP_AUXCMD_I2C);
+	default:
+		return "unknown";
+	}
+}
+
+struct ioctl_auxdev_info {
+	int size;							/* unused */
+	enum dp_auxcmd_type cmd_type;
+};
+#endif
+
 struct drm_dp_aux_dev {
 	unsigned index;
 	struct drm_dp_aux *aux;
 	struct device *dev;
 	struct kref refcount;
 	atomic_t usecount;
+#ifdef CONFIG_SEC_DISPLAYPORT
+	enum dp_auxcmd_type cmd_type;
+#endif
 };
 
 #define DRM_AUX_MINORS	256
@@ -88,6 +134,9 @@ static struct drm_dp_aux_dev *alloc_drm_dp_aux_dev(struct drm_dp_aux *aux)
 		return ERR_PTR(index);
 	}
 	aux_dev->index = index;
+#ifdef CONFIG_SEC_DISPLAYPORT
+	aux_dev->cmd_type = DP_AUXCMD_NATIVE;
+#endif
 
 	return aux_dev;
 }
@@ -153,7 +202,11 @@ static ssize_t auxdev_read_iter(struct kiocb *iocb, struct iov_iter *to)
 	iov_iter_truncate(to, AUX_MAX_OFFSET - pos);
 
 	while (iov_iter_count(to)) {
+#ifdef CONFIG_SEC_DISPLAYPORT
+		uint8_t buf[512];
+#else
 		uint8_t buf[DP_AUX_MAX_PAYLOAD_BYTES];
+#endif
 		ssize_t todo = min(iov_iter_count(to), sizeof(buf));
 
 		if (signal_pending(current)) {
@@ -161,7 +214,14 @@ static ssize_t auxdev_read_iter(struct kiocb *iocb, struct iov_iter *to)
 			break;
 		}
 
+#ifdef CONFIG_SEC_DISPLAYPORT
+		if (aux_dev->cmd_type == DP_AUXCMD_NATIVE)
+			res = drm_dp_dpcd_read(aux_dev->aux, pos, buf, todo);
+		else
+			res = drm_dp_i2c_read(aux_dev->aux, buf, todo);
+#else
 		res = drm_dp_dpcd_read(aux_dev->aux, pos, buf, todo);
+#endif
 		if (res <= 0)
 			break;
 
@@ -194,7 +254,11 @@ static ssize_t auxdev_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	iov_iter_truncate(from, AUX_MAX_OFFSET - pos);
 
 	while (iov_iter_count(from)) {
+#ifdef CONFIG_SEC_DISPLAYPORT
+		uint8_t buf[512];
+#else
 		uint8_t buf[DP_AUX_MAX_PAYLOAD_BYTES];
+#endif
 		ssize_t todo = min(iov_iter_count(from), sizeof(buf));
 
 		if (signal_pending(current)) {
@@ -207,7 +271,14 @@ static ssize_t auxdev_write_iter(struct kiocb *iocb, struct iov_iter *from)
 			break;
 		}
 
+#ifdef CONFIG_SEC_DISPLAYPORT
+		if (aux_dev->cmd_type == DP_AUXCMD_NATIVE)
+			res = drm_dp_dpcd_write(aux_dev->aux, pos, buf, todo);
+		else
+			res = drm_dp_i2c_write(aux_dev->aux, buf, todo);
+#else
 		res = drm_dp_dpcd_write(aux_dev->aux, pos, buf, todo);
+#endif
 		if (res <= 0)
 			break;
 
@@ -231,6 +302,42 @@ static int auxdev_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
+#ifdef CONFIG_SEC_DISPLAYPORT
+static long auxdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+	s32 res = 0, rc = 0;
+	u32 size = 0;
+	struct ioctl_auxdev_info info;
+	struct drm_dp_aux_dev *aux_dev = file->private_data;
+
+	pr_debug("+++\n");
+
+	if (_IOC_TYPE(cmd) != IOCTL_MAGIC)
+		return -EINVAL;
+	if (_IOC_NR(cmd) >= IOCTL_MAXNR)
+		return -EINVAL;
+
+	size = sizeof(struct ioctl_auxdev_info);
+	pr_info("cmd: %s\n", auxdev_ioctl_cmd_to_string(cmd));
+
+	switch (cmd) {
+	case IOCTL_DP_AUXCMD_TYPE:
+		rc = copy_from_user((void *)&info, (void *)arg, size);
+		if (rc) {
+			pr_debug("error at copy_from_user, rc(%d)\n", rc);
+			break;
+		}
+		aux_dev->cmd_type = info.cmd_type;
+		pr_info("auxcmd_type: %s\n", auxcmd_type_to_string(aux_dev->cmd_type));
+		break;
+	default:
+		break;
+	}
+
+	return res;
+}
+#endif
+
 static const struct file_operations auxdev_fops = {
 	.owner		= THIS_MODULE,
 	.llseek		= auxdev_llseek,
@@ -238,6 +345,12 @@ static const struct file_operations auxdev_fops = {
 	.write_iter	= auxdev_write_iter,
 	.open		= auxdev_open,
 	.release	= auxdev_release,
+#ifdef CONFIG_SEC_DISPLAYPORT
+	.unlocked_ioctl	= auxdev_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl	= auxdev_ioctl,
+#endif
+#endif
 };
 
 #define to_auxdev(d) container_of(d, struct drm_dp_aux_dev, aux)

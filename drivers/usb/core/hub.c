@@ -35,9 +35,16 @@
 
 #include "hub.h"
 #include "otg_whitelist.h"
+#if defined(CONFIG_USB_NOTIFY_LAYER)
+#include <linux/usb_notify.h>
+#endif
+
+#undef dev_dbg
+#define dev_dbg dev_err
 
 #define USB_VENDOR_GENESYS_LOGIC		0x05e3
 #define USB_VENDOR_SMSC				0x0424
+#define USB_PRODUCT_USB5534B			0x5534
 #define HUB_QUIRK_CHECK_PORT_AUTOSUSPEND	0x01
 #define HUB_QUIRK_DISABLE_AUTOSUSPEND		0x02
 
@@ -114,6 +121,7 @@ static int usb_reset_and_verify_device(struct usb_device *udev);
 static int hub_port_disable(struct usb_hub *hub, int port1, int set_state);
 static bool hub_port_warm_reset_required(struct usb_hub *hub, int port1,
 		u16 portstatus);
+static void hub_set_initial_usb2_lpm_policy(struct usb_device *udev);
 
 static inline char *portspeed(struct usb_hub *hub, int portstatus)
 {
@@ -938,7 +946,11 @@ static int hub_set_port_link_state(struct usb_hub *hub, int port1,
  */
 static void hub_port_logical_disconnect(struct usb_hub *hub, int port1)
 {
+#ifdef CONFIG_USB_DEBUG_DETAILED_LOG
+	dev_info(&hub->ports[port1 - 1]->dev, "logical disconnect\n");
+#else
 	dev_dbg(&hub->ports[port1 - 1]->dev, "logical disconnect\n");
+#endif
 	hub_port_disable(hub, port1, 1);
 
 	/* FIXME let caller ask to power down the port:
@@ -1776,7 +1788,7 @@ static int hub_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	 */
 #ifdef CONFIG_PM
 	if (hdev->dev.power.autosuspend_delay >= 0)
-		pm_runtime_set_autosuspend_delay(&hdev->dev, 0);
+		pm_runtime_set_autosuspend_delay(&hdev->dev, 2000);
 #endif
 
 	/*
@@ -1785,7 +1797,8 @@ static int hub_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	 * bus_resume methods.
 	 */
 	if (hdev->parent) {		/* normal device */
-		usb_enable_autosuspend(hdev);
+		if (!(hdev->quirks & USB_QUIRK_HUB_NO_SUSPEND))
+			usb_enable_autosuspend(hdev);
 	} else {			/* root hub */
 		const struct hc_driver *drv = bus_to_hcd(hdev->bus)->driver;
 
@@ -2373,8 +2386,24 @@ static int usb_enumerate_device(struct usb_device *udev)
 		}
 		return -ENOTSUPP;
 	}
+#if defined(CONFIG_USB_NOTIFY_LAYER)
+	if (!usb_check_whitelist_for_mdm(udev)) {
+		if (IS_ENABLED(CONFIG_USB_OTG) && (udev->bus->b_hnp_enable
+			|| udev->bus->is_b_host)) {
+			err = usb_port_suspend(udev, PMSG_AUTO_SUSPEND);
+			if (err < 0)
+				dev_dbg(&udev->dev, "HNP fail, %d\n", err);
+		}
+		return -ENOTSUPP;
+	}
+#endif
 
 	usb_detect_interface_quirks(udev);
+
+#ifdef CONFIG_USB_INTERFACE_LPM_LIST
+	if (usb_detect_interface_lpm(udev))
+		hub_set_initial_usb2_lpm_policy(udev);
+#endif
 
 	return 0;
 }
@@ -3468,6 +3497,8 @@ int usb_port_resume(struct usb_device *udev, pm_message_t msg)
 	int		port1 = udev->portnum;
 	int		status;
 	u16		portchange, portstatus;
+	
+	dev_dbg(&port_dev->dev, "msg = %d\n", msg.event);
 
 	if (!test_and_set_bit(port1, hub->child_usage_bits)) {
 		status = pm_runtime_get_sync(&port_dev->dev);
@@ -4743,11 +4774,15 @@ hub_port_init(struct usb_hub *hub, struct usb_device *udev, int port1,
 		}
 	}
 
+	dev_info(&udev->dev, "udev->lpm_capable=%d\n", udev->lpm_capable);
+
 	retval = 0;
 	/* notify HCD that we have a device connected and addressed */
 	if (hcd->driver->update_device)
 		hcd->driver->update_device(hcd, udev);
+#ifndef CONFIG_USB_INTERFACE_LPM_LIST
 	hub_set_initial_usb2_lpm_policy(udev);
+#endif
 fail:
 	if (retval) {
 		hub_port_disable(hub, port1, 0);
@@ -4843,6 +4878,11 @@ static void hub_port_connect(struct usb_hub *hub, int port1, u16 portstatus,
 	struct usb_port *port_dev = hub->ports[port1 - 1];
 	struct usb_device *udev = port_dev->child;
 	static int unreliable_port = -1;
+#ifdef CONFIG_USB_DEBUG_DETAILED_LOG
+	dev_info(&port_dev->dev,
+		"port %d, status %04x, change %04x, %s\n",
+		port1, portstatus, portchange, portspeed(hub, portstatus));
+#endif
 
 	/* Disconnect any existing devices under this port */
 	if (udev) {
@@ -5210,7 +5250,16 @@ static void port_event(struct usb_hub *hub, int port1)
 		} else {
 			usb_unlock_port(port_dev);
 			usb_lock_device(udev);
+#if defined(CONFIG_USB_HOST_SAMSUNG_FEATURE)
+			if (le16_to_cpu(udev->descriptor.idVendor) == 0x2109 &&
+				le16_to_cpu(udev->descriptor.idProduct) == 0x0817) {
+				dev_dbg(&port_dev->dev, "intentional disconnection 2 for mpa2\n");
+				hub_port_logical_disconnect(hub, port1);
+			} else
+				usb_reset_device(udev);
+#else
 			usb_reset_device(udev);
+#endif
 			usb_unlock_device(udev);
 			usb_lock_port(port_dev);
 			connect_change = 0;
@@ -5349,8 +5398,11 @@ out_hdev_lock:
 }
 
 static const struct usb_device_id hub_id_table[] = {
-    { .match_flags = USB_DEVICE_ID_MATCH_VENDOR | USB_DEVICE_ID_MATCH_INT_CLASS,
+    { .match_flags = USB_DEVICE_ID_MATCH_VENDOR
+                   | USB_DEVICE_ID_MATCH_PRODUCT
+                   | USB_DEVICE_ID_MATCH_INT_CLASS,
       .idVendor = USB_VENDOR_SMSC,
+      .idProduct = USB_PRODUCT_USB5534B,
       .bInterfaceClass = USB_CLASS_HUB,
       .driver_info = HUB_QUIRK_DISABLE_AUTOSUSPEND},
     { .match_flags = USB_DEVICE_ID_MATCH_VENDOR

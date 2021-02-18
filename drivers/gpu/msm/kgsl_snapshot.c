@@ -654,6 +654,11 @@ void kgsl_device_snapshot(struct kgsl_device *device,
 		"snapshot: device is powered off\n"))
 		return;
 
+#if 0
+	KGSL_DRV_ERR(device, "force return due to NOC error\n");
+	return;
+#endif
+	
 	/* increment the hang count for good book keeping */
 	device->snapshot_faultcount++;
 

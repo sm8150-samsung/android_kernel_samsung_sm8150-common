@@ -1029,14 +1029,22 @@ int sde_power_resource_enable(struct sde_power_handle *phandle,
 				SDE_POWER_EVENT_PRE_DISABLE);
 
 		SDE_EVT32_VERBOSE(enable, SDE_EVTLOG_FUNC_CASE2);
-		sde_power_rsc_update(phandle, false);
+		rc = sde_power_rsc_update(phandle, false);
+		if (rc)
+			pr_err("failed to update rsc rc=%d\n", rc);
 
-		msm_dss_enable_clk(mp->clk_config, mp->num_clk, enable);
+		rc = msm_dss_enable_clk(mp->clk_config, mp->num_clk, enable);
+		if (rc)
+			pr_err("clock disable failed rc=%d\n", rc);
 
-		sde_power_scale_reg_bus(phandle, pclient,
+
+		rc = sde_power_scale_reg_bus(phandle, pclient,
 				max_usecase_ndx, true);
 
-		msm_dss_enable_vreg(mp->vreg_config, mp->num_vreg, enable);
+		rc = msm_dss_enable_vreg(mp->vreg_config, mp->num_vreg,
+				enable);
+		if (rc)
+			pr_err("failed to disable vregs rc=%d\n", rc);
 
 		for (i = 0 ; i < SDE_POWER_HANDLE_DBUS_ID_MAX; i++)
 			sde_power_data_bus_update(&phandle->data_bus_handle[i],

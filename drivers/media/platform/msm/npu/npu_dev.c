@@ -1239,6 +1239,7 @@ static int npu_close(struct inode *inode, struct file *file)
 {
 	struct npu_client *client = file->private_data;
 	struct npu_kevent *kevent;
+	
 
 	npu_host_cleanup_networks(client);
 

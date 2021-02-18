@@ -936,6 +936,12 @@ static int clk_debug_sm8150_probe(struct platform_device *pdev)
 	if (ret)
 		dev_err(&pdev->dev, "Could not register Measure clock\n");
 
+	gcc_debug_mux.bus_cl_id =
+		msm_bus_scale_register_client(&clk_measure_scale_table);
+
+	if (!gcc_debug_mux.bus_cl_id)
+		dev_err(&pdev->dev, "Could not register for bandwidth voting\n");
+
 	return ret;
 }
 

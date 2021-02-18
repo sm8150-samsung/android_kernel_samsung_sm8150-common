@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -224,13 +224,6 @@ static int cam_bps_cmd_reset(struct cam_hw_soc_info *soc_info,
 	bool reset_bps_top_fail = false;
 
 	CAM_DBG(CAM_ICP, "CAM_ICP_BPS_CMD_RESET");
-
-	if (!core_info->clk_enable || !core_info->cpas_start) {
-		CAM_ERR(CAM_ICP, "BPS reset failed. clk_en %d cpas_start %d",
-				core_info->clk_enable, core_info->cpas_start);
-		return -EINVAL;
-	}
-
 	/* Reset BPS CDM core*/
 	cam_io_w_mb((uint32_t)0xF,
 		soc_info->reg_map[0].mem_base + BPS_CDM_RST_CMD);
@@ -292,6 +285,28 @@ static int cam_bps_cmd_reset(struct cam_hw_soc_info *soc_info,
 	return rc;
 }
 
+static void cam_bps_cmd_dump_pwr_sts(
+	struct cam_hw_info *bps_dev)
+{
+	struct cam_bps_device_core_info *core_info = NULL;
+	struct cam_bps_device_hw_info *hw_info = NULL;
+	uint32_t pwr_status = 0xEFEF;
+	uint32_t pwr_ctrl = 0xFEFE;
+
+	core_info = (struct cam_bps_device_core_info *)bps_dev->core_info;
+	hw_info = core_info->bps_hw_info;
+
+	cam_cpas_reg_read(core_info->cpas_handle,
+		CAM_CPAS_REG_CPASTOP, hw_info->pwr_ctrl,
+		true, &pwr_ctrl);
+
+	cam_cpas_reg_read(core_info->cpas_handle,
+		CAM_CPAS_REG_CPASTOP, hw_info->pwr_status,
+		true, &pwr_status);
+	CAM_INFO(CAM_ICP, "pwr_ctrl 0x%x pwr_status = 0x%x",
+		pwr_ctrl, pwr_status);
+}
+
 int cam_bps_process_cmd(void *device_priv, uint32_t cmd_type,
 	void *cmd_args, uint32_t arg_size)
 {
@@ -347,11 +362,7 @@ int cam_bps_process_cmd(void *device_priv, uint32_t cmd_type,
 
 	case CAM_ICP_BPS_CMD_CPAS_STOP:
 		if (core_info->cpas_start) {
-			rc = cam_cpas_stop(core_info->cpas_handle);
-			if (rc) {
-				CAM_ERR(CAM_ICP, "cpas stop failed %d", rc);
-				return rc;
-			}
+			cam_cpas_stop(core_info->cpas_handle);
 			core_info->cpas_start = false;
 		}
 		break;
@@ -399,6 +410,9 @@ int cam_bps_process_cmd(void *device_priv, uint32_t cmd_type,
 		break;
 	case CAM_ICP_BPS_CMD_RESET:
 		rc = cam_bps_cmd_reset(soc_info, core_info);
+		break;
+	case CAM_ICP_BPS_CMD_PWR_STS:
+		cam_bps_cmd_dump_pwr_sts(bps_dev);
 		break;
 	default:
 		CAM_ERR(CAM_ICP, "Invalid Cmd Type:%u", cmd_type);

@@ -68,6 +68,14 @@
 #include <asm/pgtable.h>
 #include <asm/mmu_context.h>
 
+#ifdef CONFIG_SECURITY_DEFEX
+#include <linux/defex.h>
+#endif
+
+#ifdef CONFIG_SEC_DEBUG
+#include <linux/sec_debug.h>
+#endif
+
 static void __unhash_process(struct task_struct *p, bool group_dead)
 {
 	nr_threads--;
@@ -778,10 +786,20 @@ static inline void check_stack_usage(void) {}
 void __noreturn do_exit(long code)
 {
 	struct task_struct *tsk = current;
+	struct pid_namespace *pid_ns;
+	struct task_struct *reaper;
 	int group_dead;
 
-	profile_task_exit(tsk);
-	kcov_task_exit(tsk);
+#ifdef CONFIG_SECURITY_DEFEX
+	task_defex_zero_creds(current);
+#endif
+
+	/*
+	 * We can get here from a kernel oops, sometimes with preemption off.
+	 * Start by checking for critical errors.
+	 * Then fix up important state like USER_DS and preemption.
+	 * Then do everything else.
+	 */
 
 	WARN_ON(blk_needs_flush_plug(tsk));
 
@@ -798,6 +816,16 @@ void __noreturn do_exit(long code)
 	 * kernel address.
 	 */
 	set_fs(USER_DS);
+
+	if (unlikely(in_atomic())) {
+		pr_info("note: %s[%d] exited with preempt_count %d\n",
+			current->comm, task_pid_nr(current),
+			preempt_count());
+		preempt_count_set(PREEMPT_ENABLED);
+	}
+
+	profile_task_exit(tsk);
+	kcov_task_exit(tsk);
 
 	ptrace_event(PTRACE_EVENT_EXIT, code);
 
@@ -820,13 +848,6 @@ void __noreturn do_exit(long code)
 
 	exit_signals(tsk);  /* sets PF_EXITING */
 	sched_exit(tsk);
-
-	if (unlikely(in_atomic())) {
-		pr_info("note: %s[%d] exited with preempt_count %d\n",
-			current->comm, task_pid_nr(current),
-			preempt_count());
-		preempt_count_set(PREEMPT_ENABLED);
-	}
 
 	/* sync mm's RSS info before statistics gathering */
 	if (tsk->mm)
@@ -856,6 +877,26 @@ void __noreturn do_exit(long code)
 
 	tsk->exit_code = code;
 	taskstats_exit(tsk, group_dead);
+
+#ifdef CONFIG_SEC_DEBUG
+	if (sec_debug_is_enabled()) {
+		write_lock_irq(&tasklist_lock);
+		pid_ns = task_active_pid_ns(tsk);
+		if (unlikely(pid_ns == &init_pid_ns)) {
+			reaper = pid_ns->child_reaper;
+			if (unlikely(reaper == tsk)) {
+				reaper = find_alive_thread(tsk);
+				if (unlikely(!reaper)) {
+					write_unlock_irq(&tasklist_lock);
+					panic("Attempted to kill init! exitcode=0x%08x\n",
+						tsk->signal->group_exit_code ?: tsk->exit_code);
+					write_lock_irq(&tasklist_lock);
+				}
+			}
+		}
+		write_unlock_irq(&tasklist_lock);
+	}
+#endif
 
 	exit_mm();
 
@@ -1612,10 +1653,9 @@ SYSCALL_DEFINE5(waitid, int, which, pid_t, upid, struct siginfo __user *,
 	if (!infop)
 		return err;
 
-	if (!access_ok(VERIFY_WRITE, infop, sizeof(*infop)))
+	if (!user_access_begin(VERIFY_WRITE, infop, sizeof(*infop)))
 		return -EFAULT;
 
-	user_access_begin();
 	unsafe_put_user(signo, &infop->si_signo, Efault);
 	unsafe_put_user(0, &infop->si_errno, Efault);
 	unsafe_put_user(info.cause, &infop->si_code, Efault);
@@ -1740,10 +1780,9 @@ COMPAT_SYSCALL_DEFINE5(waitid,
 	if (!infop)
 		return err;
 
-	if (!access_ok(VERIFY_WRITE, infop, sizeof(*infop)))
+	if (!user_access_begin(VERIFY_WRITE, infop, sizeof(*infop)))
 		return -EFAULT;
 
-	user_access_begin();
 	unsafe_put_user(signo, &infop->si_signo, Efault);
 	unsafe_put_user(0, &infop->si_errno, Efault);
 	unsafe_put_user(info.cause, &infop->si_code, Efault);

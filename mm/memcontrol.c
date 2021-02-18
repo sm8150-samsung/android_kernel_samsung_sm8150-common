@@ -3341,6 +3341,17 @@ static int memcg_stat_show(struct seq_file *m, void *v)
 
 	return 0;
 }
+static u64 mem_cgroup_vmpressure_read(struct cgroup_subsys_state *css,
+				      struct cftype *cft)
+{
+	struct mem_cgroup *memcg = mem_cgroup_from_css(css);
+	struct vmpressure *vmpr = memcg_to_vmpressure(memcg);
+	unsigned long vmpressure;
+
+	vmpressure = vmpr->pressure;
+
+	return vmpressure;
+}
 
 static u64 mem_cgroup_swappiness_read(struct cgroup_subsys_state *css,
 				      struct cftype *cft)
@@ -4099,6 +4110,10 @@ static struct cftype mem_cgroup_legacy_files[] = {
 	},
 	{
 		.name = "pressure_level",
+	},
+	{
+		.name = "vmpressure",
+		.read_u64 = mem_cgroup_vmpressure_read,
 	},
 #ifdef CONFIG_NUMA
 	{
@@ -4928,7 +4943,6 @@ static void __mem_cgroup_clear_mc(void)
 		if (!mem_cgroup_is_root(mc.to))
 			page_counter_uncharge(&mc.to->memory, mc.moved_swap);
 
-		mem_cgroup_id_get_many(mc.to, mc.moved_swap);
 		css_put_many(&mc.to->css, mc.moved_swap);
 
 		mc.moved_swap = 0;
@@ -5119,7 +5133,8 @@ put:			/* get_mctgt_type() gets the page */
 			ent = target.ent;
 			if (!mem_cgroup_move_swap_account(ent, mc.from, mc.to)) {
 				mc.precharge--;
-				/* we fixup refcnts and charges later. */
+				mem_cgroup_id_get_many(mc.to, 1);
+				/* we fixup other refcnts and charges later. */
 				mc.moved_swap++;
 			}
 			break;

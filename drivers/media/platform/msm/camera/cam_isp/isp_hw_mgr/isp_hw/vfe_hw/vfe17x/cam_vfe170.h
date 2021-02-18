@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -336,31 +336,6 @@ static struct cam_vfe_top_ver2_hw_info vfe170_top_hw_info = {
 			NULL,
 			},
 		},
-	.dump_data = {
-		.num_reg_dump_entries  =  2,
-		.num_lut_dump_entries  =  1,
-		.dmi_cfg               =  0xc24,
-		.dmi_addr              =  0xc28,
-		.dmi_data_path_hi      =  0xc2C,
-		.dmi_data_path_lo      =  0xc30,
-		.reg_entry = {
-			{
-				.reg_dump_start = 0x0,
-				.reg_dump_end   = 0x1160,
-			},
-			{
-				.reg_dump_start = 0x2000,
-				.reg_dump_end   = 0x3978,
-			},
-		},
-		.lut_entry = {
-			{
-				.lut_word_size = 64,
-				.lut_bank_sel  = 0x40,
-				.lut_addr_size = 180,
-			},
-		},
-	},
 	.mux_type = {
 		CAM_VFE_CAMIF_VER_2_0,
 		CAM_VFE_RDI_VER_1_0,
@@ -1015,12 +990,6 @@ static struct cam_vfe_bus_ver2_hw_info vfe170_bus_hw_info = {
 			.max_width     = -1,
 			.max_height    = -1,
 		},
-	},
-	.reg_data = {
-		.ubwc_10bit_threshold_lossy_0 = 0,
-		.ubwc_10bit_threshold_lossy_1 = 0,
-		.ubwc_8bit_threshold_lossy_0 = 0,
-		.ubwc_8bit_threshold_lossy_1 = 0,
 	},
 	.stats_data = &stats_170_info,
 };

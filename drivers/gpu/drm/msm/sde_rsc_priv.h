@@ -170,6 +170,7 @@ struct sde_rsc_bw_config {
  * @disp_rsc:		display rsc handle
  * @drv_io:		sde drv io data mapping
  * @wrapper_io:		wrapper io data mapping
+ * @dispcc_io:		display cc io data mapping
  *
  * @client_list:	current rsc client list handle
  * @event_list:		current rsc event list handle
@@ -213,6 +214,7 @@ struct sde_rsc_priv {
 	struct rpmh_client *disp_rsc;
 	struct dss_io_data drv_io;
 	struct dss_io_data wrapper_io;
+	struct dss_io_data dispcc_io;
 
 	struct list_head client_list;
 	struct list_head event_list;

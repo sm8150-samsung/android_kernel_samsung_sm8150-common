@@ -17,6 +17,18 @@
 
 #include <linux/scatterlist.h>
 
+struct mem_prot_info {
+	phys_addr_t addr;
+	u64 size;
+};
+
+struct dest_vm_and_perm_info {
+	u32 vm;
+	u32 perm;
+	u64 ctx;
+	u32 ctx_size;
+};
+
 /*
  * if you add a secure VMID here make sure you update
  * msm_secure_vmid_to_string.

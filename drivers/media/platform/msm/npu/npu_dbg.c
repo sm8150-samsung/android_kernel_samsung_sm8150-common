@@ -37,3 +37,34 @@ void npu_dump_debug_timeout_stats(struct npu_device *npu_dev)
 	reg_val = REGR(npu_dev, REG_NPU_FW_DEBUG_DATA);
 	pr_info("fw jobs aco parser debug = %d\n", reg_val);
 }
+
+void npu_dump_ipc_packet(struct npu_device *npu_dev, void *cmd_ptr)
+{
+	int32_t *ptr = (int32_t *)cmd_ptr;
+	uint32_t cmd_pkt_size = 0;
+	int i;
+
+	cmd_pkt_size = (*(uint32_t *)cmd_ptr);
+
+	pr_err("IPC packet size %d content:\n", cmd_pkt_size);
+	for (i = 0; i < cmd_pkt_size/4; i++)
+		pr_err("%x\n", ptr[i]);
+}
+
+void npu_dump_ipc_queue(struct npu_device *npu_dev, uint32_t target_que)
+{
+	struct hfi_queue_header queue;
+	size_t offset = (size_t)IPC_ADDR +
+		sizeof(struct hfi_queue_tbl_header) +
+		target_que * sizeof(struct hfi_queue_header);
+	int32_t *ptr = (int32_t *)&queue;
+	int i;
+
+	MEMR(npu_dev, (void *)((size_t)offset), (uint8_t *)&queue,
+		HFI_QUEUE_HEADER_SIZE);
+
+	pr_err("IPC queue %d size %d content:\n", target_que,
+		HFI_QUEUE_HEADER_SIZE);
+	for (i = 0; i < HFI_QUEUE_HEADER_SIZE/4; i++)
+		pr_err("%x\n", ptr[i]);
+}

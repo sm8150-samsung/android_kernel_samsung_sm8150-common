@@ -24,7 +24,9 @@
 #define CAM_FLASH_DEVICE_TYPE     (CAM_DEVICE_TYPE_BASE + 11)
 #define CAM_EEPROM_DEVICE_TYPE    (CAM_DEVICE_TYPE_BASE + 12)
 #define CAM_OIS_DEVICE_TYPE       (CAM_DEVICE_TYPE_BASE + 13)
-#define CAM_IRLED_DEVICE_TYPE     (CAM_DEVICE_TYPE_BASE + 14)
+#if 1//defined(CONFIG_SAMSUNG_APERTURE)
+#define CAM_APERTURE_DEVICE_TYPE  (CAM_DEVICE_TYPE_BASE + 14)
+#endif
 
 /* cam_req_mgr hdl info */
 #define CAM_REQ_MGR_HDL_IDX_POS           8
@@ -37,7 +39,7 @@
  */
 #define CAM_REQ_MGR_MAX_HANDLES           64
 #define CAM_REQ_MGR_MAX_HANDLES_V2        128
-#define MAX_LINKS_PER_SESSION             2
+#define MAX_LINKS_PER_SESSION             4
 
 /* V4L event type which user space will subscribe to */
 #define V4L_EVENT_CAM_REQ_MGR_EVENT       (V4L2_EVENT_PRIVATE_START + 0)
@@ -141,8 +143,9 @@ struct cam_req_mgr_ver_info {
 	union {
 		struct cam_req_mgr_link_info link_info_v1;
 		struct cam_req_mgr_link_info_v2 link_info_v2;
-	} u;
+} u;
 };
+
 /**
  * struct cam_req_mgr_unlink_info
  * @session_hdl: input param - session handle
@@ -202,7 +205,9 @@ struct cam_req_mgr_sched_request {
  *                             when sync_mode is one of SYNC enabled modes)
  * @link_hdls:           Input Param - Array of link handles to be in sync mode
  *                             (Valid only when sync_mode is one of SYNC
- *                             enabled modes)
+ *                             enabled modes). The size is restricted to 2 since
+ *                             frame sync can be supported only for 2 links at a
+ *                             given time.
  * @master_link_hdl:     Input Param - To dictate which link's SOF drives system
  *                             (Valid only when sync_mode is one of SYNC
  *                             enabled modes)
@@ -213,7 +218,7 @@ struct cam_req_mgr_sync_mode {
 	int32_t session_hdl;
 	int32_t sync_mode;
 	int32_t num_links;
-	int32_t link_hdls[MAX_LINKS_PER_SESSION];
+	int32_t link_hdls[2];
 	int32_t master_link_hdl;
 	int32_t reserved;
 };
@@ -225,6 +230,10 @@ struct cam_req_mgr_sync_mode {
  * @num_links:           Input Param - Num of links
  * @reserved:            reserved field
  * @link_hdls:           Input Param - Links to be activated/deactivated
+ *                       The size of the array is restricted to 2 since
+ *                       only two links are actively functioning at a given
+ *                       time hence control is limited to two links at a
+ *                       time
  *
  * @opcode: CAM_REQ_MGR_LINK_CONTROL
  */
@@ -233,7 +242,7 @@ struct cam_req_mgr_link_control {
 	int32_t session_hdl;
 	int32_t num_links;
 	int32_t reserved;
-	int32_t link_hdls[MAX_LINKS_PER_SESSION];
+	int32_t link_hdls[2];
 };
 
 /**

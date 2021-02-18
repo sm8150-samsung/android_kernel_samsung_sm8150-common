@@ -44,15 +44,26 @@ struct thread_info {
 	u64			ttbr0;		/* saved TTBR0_EL1 */
 #endif
 	int			preempt_count;	/* 0 => preemptable, <0 => bug */
+#ifdef CONFIG_RKP_CFP_ROPP
+	unsigned long rrk;
+#endif
 #ifdef CONFIG_SHADOW_CALL_STACK
 	void			*shadow_call_stack;
 #endif
 };
 
+#ifdef CONFIG_RKP_CFP_ROPP
+# define INIT_THREAD_INFO_RKP_CFP(tsk)					\
+	.rrk = 0,
+#else
+# define INIT_THREAD_INFO_RKP_CFP(tsk)
+#endif
+
 #define INIT_THREAD_INFO(tsk)						\
 {									\
 	.preempt_count	= INIT_PREEMPT_COUNT,				\
 	.addr_limit	= KERNEL_DS,					\
+	INIT_THREAD_INFO_RKP_CFP(tsk)					\
 }
 
 #define init_stack		(init_thread_union.stack)

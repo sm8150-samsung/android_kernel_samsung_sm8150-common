@@ -1698,6 +1698,9 @@ static int msm_slim_qmi_send_power_request(struct msm_slim_ctrl *dev,
 	if (!rc) {
 		rc = -ETIMEDOUT;
 		SLIM_ERR(dev, "%s: QMI TXN wait failed: %d\n", __func__, rc);
+#ifdef CONFIG_SLIMBUS_DEBUG
+		panic("msm_slim_qmi_send_power_request: QMI TXN wait failed");
+#endif
 		return rc;
 	}
 

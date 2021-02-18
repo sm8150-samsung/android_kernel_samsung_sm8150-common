@@ -450,7 +450,6 @@ static int qcom_llcc_erp_probe(struct platform_device *pdev)
 		goto out_mem;
 	}
 
-
 	irq = platform_get_irq_byname(pdev, "ecc_irq");
 	if (irq <= 0) {
 		dev_info(dev, "No ECC IRQ; defaulting to polling mode\n");

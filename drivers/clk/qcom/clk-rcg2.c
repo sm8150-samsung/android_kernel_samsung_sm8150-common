@@ -137,6 +137,10 @@ static int update_config(struct clk_rcg2 *rcg, u32 cfg)
 
 	WARN_CLK(hw->core, name, count == 0,
 			"rcg didn't update its configuration.");
+
+	if (!strcmp(name, "disp_cc_mdss_mdp_clk_src"))
+		disp_cc_dump_clocks();
+
 	return -EBUSY;
 }
 
@@ -476,7 +480,10 @@ static int clk_rcg2_configure(struct clk_rcg2 *rcg, const struct freq_tbl *f)
 	}
 
 	mask = BIT(rcg->hid_width) - 1;
-	mask |= CFG_SRC_SEL_MASK | CFG_MODE_MASK | CFG_HW_CLK_CTRL_MASK;
+	mask |= CFG_SRC_SEL_MASK | CFG_MODE_MASK;
+	if (!(rcg->flags & HW_CLK_CTRL_MODE))
+		mask |= CFG_HW_CLK_CTRL_MASK;
+
 	cfg = f->pre_div << CFG_SRC_DIV_SHIFT;
 	cfg |= rcg->parent_map[index].cfg << CFG_SRC_SEL_SHIFT;
 	if (rcg->mnd_width && f->n && (f->m != f->n))

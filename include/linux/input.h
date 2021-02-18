@@ -13,7 +13,7 @@
 #include <uapi/linux/input.h>
 /* Implementation details, userspace should not care about these */
 #define ABS_MT_FIRST		ABS_MT_TOUCH_MAJOR
-#define ABS_MT_LAST		ABS_MT_TOOL_Y
+#define ABS_MT_LAST		ABS_MT_GRIP
 
 /*
  * In-kernel definitions.
@@ -23,7 +23,6 @@
 #include <linux/fs.h>
 #include <linux/timer.h>
 #include <linux/mod_devicetable.h>
-
 /**
  * struct input_value - input value representation
  * @type: type of value (EV_KEY, EV_ABS, etc)
@@ -175,13 +174,19 @@ struct input_dev {
 	struct mutex mutex;
 
 	unsigned int users;
+	unsigned int users_private;
 	bool going_away;
+	bool disabled;
 
 	struct device dev;
 
 	struct list_head	h_list;
 	struct list_head	node;
 
+	unsigned int prev_num_vals;
+	unsigned int touch_slot_cnt;
+	int device_type;
+	
 	unsigned int num_vals;
 	unsigned int max_vals;
 	struct input_value *vals;

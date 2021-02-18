@@ -113,7 +113,9 @@ static int dsi_pwr_parse_supply_node(struct dsi_parser_utils *utils,
 			regs->vregs[i].post_off_sleep = tmp;
 		}
 
-		pr_debug("[%s] minv=%d maxv=%d, en_load=%d, dis_load=%d\n",
+		// KR_TEMP
+		pr_err("[%s] [%s] minv=%d maxv=%d, en_load=%d, dis_load=%d\n",
+			__func__,
 			 regs->vregs[i].vreg_name,
 			 regs->vregs[i].min_voltage,
 			 regs->vregs[i].max_voltage,
@@ -139,7 +141,9 @@ static int dsi_pwr_enable_vregs(struct dsi_regulator_info *regs, bool enable)
 		for (i = 0; i < regs->count; i++) {
 			vreg = &regs->vregs[i];
 			if (vreg->pre_on_sleep)
-				msleep(vreg->pre_on_sleep);
+				usleep_range((vreg->pre_on_sleep * 1000),
+						(vreg->pre_on_sleep * 1000)
+						+ 10);
 
 			rc = regulator_set_load(vreg->vreg,
 						vreg->enable_load);
@@ -168,12 +172,17 @@ static int dsi_pwr_enable_vregs(struct dsi_regulator_info *regs, bool enable)
 			}
 
 			if (vreg->post_on_sleep)
-				msleep(vreg->post_on_sleep);
+				usleep_range((vreg->post_on_sleep * 1000),
+					(vreg->post_on_sleep * 1000)
+					+ 10);
 		}
 	} else {
 		for (i = (regs->count - 1); i >= 0; i--) {
 			if (regs->vregs[i].pre_off_sleep)
-				msleep(regs->vregs[i].pre_off_sleep);
+				usleep_range((regs->vregs[i].pre_off_sleep
+					* 1000),
+					(regs->vregs[i].pre_off_sleep
+					* 1000) + 10);
 
 			if (regs->vregs[i].off_min_voltage)
 				(void)regulator_set_voltage(regs->vregs[i].vreg,
@@ -185,7 +194,10 @@ static int dsi_pwr_enable_vregs(struct dsi_regulator_info *regs, bool enable)
 			(void)regulator_disable(regs->vregs[i].vreg);
 
 			if (regs->vregs[i].post_off_sleep)
-				msleep(regs->vregs[i].post_off_sleep);
+				usleep_range((regs->vregs[i].post_off_sleep
+					* 1000),
+					(regs->vregs[i].post_off_sleep
+					* 1000)+ 10);
 		}
 	}
 
@@ -201,7 +213,9 @@ error_disable_voltage:
 error:
 	for (i--; i >= 0; i--) {
 		if (regs->vregs[i].pre_off_sleep)
-			msleep(regs->vregs[i].pre_off_sleep);
+			usleep_range((regs->vregs[i].pre_off_sleep * 1000),
+					(regs->vregs[i].pre_off_sleep * 1000)
+					+ 10);
 
 		(void)regulator_set_load(regs->vregs[i].vreg,
 					 regs->vregs[i].disable_load);
@@ -214,7 +228,9 @@ error:
 		(void)regulator_disable(regs->vregs[i].vreg);
 
 		if (regs->vregs[i].post_off_sleep)
-			msleep(regs->vregs[i].post_off_sleep);
+			usleep_range((regs->vregs[i].post_off_sleep * 1000),
+					(regs->vregs[i].post_off_sleep * 1000)
+					+ 10);
 	}
 
 	return rc;
@@ -303,10 +319,11 @@ int dsi_pwr_get_dt_vreg_data(struct device *dev,
 	of_node = dev->of_node;
 	regs->count = 0;
 	supply_root_node = of_get_child_by_name(of_node, supply_name);
+
 	if (!supply_root_node) {
 		supply_root_node = of_parse_phandle(of_node, supply_name, 0);
 		if (!supply_root_node) {
-			pr_debug("No supply entry present for %s\n",
+			pr_err("No supply entry present for %s\n",
 					supply_name);
 			return -EINVAL;
 		}

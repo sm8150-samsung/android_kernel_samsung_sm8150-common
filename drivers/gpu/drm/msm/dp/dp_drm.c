@@ -12,7 +12,7 @@
  *
  */
 
-#define pr_fmt(fmt)	"[drm-dp]: %s: " fmt, __func__
+#define pr_fmt(fmt)	"[drm-dp] %s: " fmt, __func__
 
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_atomic.h>
@@ -23,6 +23,10 @@
 #include "sde_connector.h"
 #include "dp_drm.h"
 #include "dp_debug.h"
+#ifdef CONFIG_SEC_DISPLAYPORT
+#include "secdp.h"
+#define DP_ENUM_STR(x)	#x
+#endif
 
 #define DP_MST_DEBUG(fmt, ...) pr_debug(fmt, ##__VA_ARGS__)
 
@@ -94,6 +98,8 @@ static void dp_bridge_pre_enable(struct drm_bridge *drm_bridge)
 		return;
 	}
 
+	pr_debug("+++\n");
+
 	bridge = to_dp_bridge(drm_bridge);
 	dp = bridge->display;
 
@@ -144,6 +150,8 @@ static void dp_bridge_enable(struct drm_bridge *drm_bridge)
 		return;
 	}
 
+	pr_debug("+++\n");
+
 	bridge = to_dp_bridge(drm_bridge);
 	if (!bridge->connector) {
 		pr_err("Invalid connector\n");
@@ -173,6 +181,8 @@ static void dp_bridge_disable(struct drm_bridge *drm_bridge)
 		pr_err("Invalid params\n");
 		return;
 	}
+
+	pr_debug("+++\n");
 
 	bridge = to_dp_bridge(drm_bridge);
 	if (!bridge->connector) {
@@ -212,6 +222,8 @@ static void dp_bridge_post_disable(struct drm_bridge *drm_bridge)
 		pr_err("Invalid params\n");
 		return;
 	}
+
+	pr_debug("+++\n");
 
 	bridge = to_dp_bridge(drm_bridge);
 	if (!bridge->connector) {

@@ -215,7 +215,6 @@ static void ion_secure_cma_free(struct ion_buffer *buffer)
 	if (ion_hyp_unassign_sg_from_flags(buffer->sg_table, buffer->flags,
 					   true))
 		return;
-
 	ion_cma_free(buffer);
 }
 
@@ -238,6 +237,7 @@ static int ion_secure_cma_allocate(
 	ret = ion_hyp_assign_sg_from_flags(buffer->sg_table, flags, true);
 	if (ret) {
 		if (ret == -EADDRNOTAVAIL) {
+			BUG(); /* to debug */
 			goto out_free_buf;
 		} else {
 			ion_cma_free(buffer);

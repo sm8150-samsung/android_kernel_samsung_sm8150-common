@@ -149,7 +149,7 @@ struct ffs_epfile {
 
 	/*
 	 * Buffer for holding data from partial reads which may happen since
-	 * we’re rounding user read requests to a multiple of a max packet size.
+	 * we?�re rounding user read requests to a multiple of a max packet size.
 	 *
 	 * The pointer is initialised with NULL value and may be set by
 	 * __ffs_epfile_read_data function to point to a temporary buffer.
@@ -173,34 +173,34 @@ struct ffs_epfile {
 	 *
 	 * == State transitions ==
 	 *
-	 * • ptr == NULL:  (initial state)
-	 *   ◦ __ffs_epfile_read_buffer_free: go to ptr == DROP
-	 *   ◦ __ffs_epfile_read_buffered:    nop
-	 *   ◦ __ffs_epfile_read_data allocates temp buffer: go to ptr == buf
-	 *   ◦ reading finishes:              n/a, not in ‘and reading’ state
-	 * • ptr == DROP:
-	 *   ◦ __ffs_epfile_read_buffer_free: nop
-	 *   ◦ __ffs_epfile_read_buffered:    go to ptr == NULL
-	 *   ◦ __ffs_epfile_read_data allocates temp buffer: free buf, nop
-	 *   ◦ reading finishes:              n/a, not in ‘and reading’ state
-	 * • ptr == buf:
-	 *   ◦ __ffs_epfile_read_buffer_free: free buf, go to ptr == DROP
-	 *   ◦ __ffs_epfile_read_buffered:    go to ptr == NULL and reading
-	 *   ◦ __ffs_epfile_read_data:        n/a, __ffs_epfile_read_buffered
+	 * ?? ptr == NULL:  (initial state)
+	 *   ?? __ffs_epfile_read_buffer_free: go to ptr == DROP
+	 *   ?? __ffs_epfile_read_buffered:    nop
+	 *   ?? __ffs_epfile_read_data allocates temp buffer: go to ptr == buf
+	 *   ?? reading finishes:              n/a, not in ?�and reading?? state
+	 * ?? ptr == DROP:
+	 *   ?? __ffs_epfile_read_buffer_free: nop
+	 *   ?? __ffs_epfile_read_buffered:    go to ptr == NULL
+	 *   ?? __ffs_epfile_read_data allocates temp buffer: free buf, nop
+	 *   ?? reading finishes:              n/a, not in ?�and reading?? state
+	 * ?? ptr == buf:
+	 *   ?? __ffs_epfile_read_buffer_free: free buf, go to ptr == DROP
+	 *   ?? __ffs_epfile_read_buffered:    go to ptr == NULL and reading
+	 *   ?? __ffs_epfile_read_data:        n/a, __ffs_epfile_read_buffered
 	 *                                    is always called first
-	 *   ◦ reading finishes:              n/a, not in ‘and reading’ state
-	 * • ptr == NULL and reading:
-	 *   ◦ __ffs_epfile_read_buffer_free: go to ptr == DROP and reading
-	 *   ◦ __ffs_epfile_read_buffered:    n/a, mutex is held
-	 *   ◦ __ffs_epfile_read_data:        n/a, mutex is held
-	 *   ◦ reading finishes and …
-	 *     … all data read:               free buf, go to ptr == NULL
-	 *     … otherwise:                   go to ptr == buf and reading
-	 * • ptr == DROP and reading:
-	 *   ◦ __ffs_epfile_read_buffer_free: nop
-	 *   ◦ __ffs_epfile_read_buffered:    n/a, mutex is held
-	 *   ◦ __ffs_epfile_read_data:        n/a, mutex is held
-	 *   ◦ reading finishes:              free buf, go to ptr == DROP
+	 *   ?? reading finishes:              n/a, not in ?�and reading?? state
+	 * ?? ptr == NULL and reading:
+	 *   ?? __ffs_epfile_read_buffer_free: go to ptr == DROP and reading
+	 *   ?? __ffs_epfile_read_buffered:    n/a, mutex is held
+	 *   ?? __ffs_epfile_read_data:        n/a, mutex is held
+	 *   ?? reading finishes and ??
+	 *     ?? all data read:               free buf, go to ptr == NULL
+	 *     ?? otherwise:                   go to ptr == buf and reading
+	 * ?? ptr == DROP and reading:
+	 *   ?? __ffs_epfile_read_buffer_free: nop
+	 *   ?? __ffs_epfile_read_buffered:    n/a, mutex is held
+	 *   ?? __ffs_epfile_read_data:        n/a, mutex is held
+	 *   ?? reading finishes:              free buf, go to ptr == DROP
 	 */
 	struct ffs_buffer		*read_buffer;
 #define READ_BUFFER_DROP ((struct ffs_buffer *)ERR_PTR(-ESHUTDOWN))
@@ -782,7 +782,7 @@ static ssize_t ffs_copy_to_iter(void *data, int data_len, struct iov_iter *iter)
 	 * internally uses a larger, aligned buffer so that such UDCs are happy.
 	 *
 	 * Unfortunately, this means that host may send more data than was
-	 * requested in read(2) system call.  f_fs doesn’t know what to do with
+	 * requested in read(2) system call.  f_fs doesn?�t know what to do with
 	 * that excess data so it simply drops it.
 	 *
 	 * Was the buffer aligned in the first place, no such problem would
@@ -790,7 +790,7 @@ static ssize_t ffs_copy_to_iter(void *data, int data_len, struct iov_iter *iter)
 	 *
 	 * Data may be dropped only in AIO reads.  Synchronous reads are handled
 	 * by splitting a request into multiple parts.  This splitting may still
-	 * be a problem though so it’s likely best to align the buffer
+	 * be a problem though so it?�s likely best to align the buffer
 	 * regardless of it being AIO or not..
 	 *
 	 * This only affects OUT endpoints, i.e. reading data with a read(2),
@@ -991,7 +991,7 @@ static ssize_t ffs_epfile_io(struct file *file, struct ffs_io_data *io_data)
 		/*
 		 * Do we have buffered data from previous partial read?  Check
 		 * that for synchronous case only because we do not have
-		 * facility to ‘wake up’ a pending asynchronous read and push
+		 * facility to ?�wake up?? a pending asynchronous read and push
 		 * buffered data to it which we would need to make things behave
 		 * consistently.
 		 */
@@ -3785,7 +3785,6 @@ static void ffs_func_unbind(struct usb_configuration *c,
 	while (count--) {
 		if (ep->ep && ep->req)
 			usb_ep_free_request(ep->ep, ep->req);
-		ep->req = NULL;
 		ep->ep = NULL;
 		++ep;
 	}

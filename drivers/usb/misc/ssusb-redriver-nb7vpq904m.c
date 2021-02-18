@@ -3,6 +3,7 @@
  * Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
  */
 
+#include <linux/string.h>
 #include <linux/module.h>
 #include <linux/i2c.h>
 #include <linux/slab.h>
@@ -13,6 +14,8 @@
 #include <linux/uaccess.h>
 #include <linux/regmap.h>
 #include <linux/ctype.h>
+#include <linux/of_gpio.h>
+#include <linux/combo_redriver/ssusb-redriver-nb7vpq904m.h>
 
 /* priority: INT_MAX >= x >= 0 */
 #define NOTIFIER_PRIORITY		1
@@ -43,13 +46,13 @@
 
 #define OP_MODE_SHIFT		1
 
-#define EQ_SETTING_MASK			0x07
-#define OUTPUT_COMPRESSION_MASK		0x03
-#define LOSS_MATCH_MASK			0x03
-#define FLAT_GAIN_MASK			0x03
+#define EQ_SETTING_MASK			0x0E
+#define OUTPUT_COMPRESSION_MASK		0x17
+#define LOSS_MATCH_MASK			0x07
+#define FLAT_GAIN_MASK			0xC3
 
-#define EQ_SETTING_SHIFT		0x01
-#define OUTPUT_COMPRESSION_SHIFT	0x01
+#define EQ_SETTING_SHIFT		0x00
+#define OUTPUT_COMPRESSION_SHIFT	0x00
 #define LOSS_MATCH_SHIFT		0x00
 #define FLAT_GAIN_SHIFT			0x00
 
@@ -57,24 +60,13 @@
 #define CHNB_INDEX		1
 #define CHNC_INDEX		2
 #define CHND_INDEX		3
+struct ssusb_redriver *redriver_data;
 
 /* for type c cable */
 enum plug_orientation {
 	ORIENTATION_NONE,
 	ORIENTATION_CC1,
 	ORIENTATION_CC2,
-};
-
-/*
- * Three Modes of Operations:
- *  - One/Two ports of USB 3.1 Gen1/Gen2 (Default Mode)
- *  - Two lanes of DisplayPort 1.4 + One port of USB 3.1 Gen1/Gen2
- *  - Four lanes of DisplayPort 1.4
- */
-enum operation_mode {
-	OP_MODE_USB,	/* One/Two ports of USB */
-	OP_MODE_DP,		/* DP 4 Lane and DP 2 Lane */
-	OP_MODE_USB_AND_DP, /* One port of USB and DP 2 Lane */
 };
 
 /*
@@ -297,6 +289,32 @@ err_exit:
 		"failure to (%s) the redriver chip, reg 0x00 = 0x%x\n",
 		on ? "ENABLE":"DISABLE", val);
 }
+
+void ssusb_redriver_config(int mode, bool on)
+{
+	struct device_node *node;
+	if (!redriver_data) {
+		pr_err("%s: redriver is not probed!!\n", __func__);
+		return;
+	}
+	
+	if (!redriver_data->dev->of_node) {
+		pr_err("%s: redriver_data->dev->of_node is invalid!!\n", __func__);
+		return;
+	}
+		
+	node = redriver_data->dev->of_node;
+	if (!on)
+		redriver_data->typec_orientation = ORIENTATION_NONE;
+	if (gpio_get_value(of_get_named_gpio(node, "combo,con_sel", 0)))
+		redriver_data->typec_orientation = ORIENTATION_CC2;
+	else
+		redriver_data->typec_orientation = ORIENTATION_CC1;
+	redriver_data->op_mode = mode;
+	dev_info(redriver_data->dev,"mode(%d) on(%d) orientation(%d)\n", mode, on, redriver_data->typec_orientation);
+	ssusb_redriver_gen_dev_set(redriver_data, on);
+}
+EXPORT_SYMBOL(ssusb_redriver_config);
 
 static void ssusb_redriver_config_work(struct work_struct *w)
 {
@@ -773,83 +791,82 @@ static const struct regmap_config redriver_regmap = {
 static int redriver_i2c_probe(struct i2c_client *client,
 			       const struct i2c_device_id *dev_id)
 {
-	struct ssusb_redriver *redriver;
 	union power_supply_propval pval = {0};
 	int ret;
 
-	redriver = devm_kzalloc(&client->dev, sizeof(struct ssusb_redriver),
+	redriver_data = devm_kzalloc(&client->dev, sizeof(struct ssusb_redriver),
 			GFP_KERNEL);
-	if (!redriver)
+	if (!redriver_data)
 		return -ENOMEM;
 
-	INIT_WORK(&redriver->config_work, ssusb_redriver_config_work);
+	INIT_WORK(&redriver_data->config_work, ssusb_redriver_config_work);
 
-	redriver->redriver_wq = alloc_ordered_workqueue("redriver_wq",
+	redriver_data->redriver_wq = alloc_ordered_workqueue("redriver_wq",
 			WQ_HIGHPRI);
-	if (!redriver->redriver_wq) {
+	if (!redriver_data->redriver_wq) {
 		dev_err(&client->dev,
 			"%s: Unable to create workqueue redriver_wq\n",
 			__func__);
 		return -ENOMEM;
 	}
 
-	redriver->dev = &client->dev;
+	redriver_data->dev = &client->dev;
 
-	redriver->regmap = devm_regmap_init_i2c(client, &redriver_regmap);
-	if (IS_ERR(redriver->regmap)) {
-		ret = PTR_ERR(redriver->regmap);
+	redriver_data->regmap = devm_regmap_init_i2c(client, &redriver_regmap);
+	if (IS_ERR(redriver_data->regmap)) {
+		ret = PTR_ERR(redriver_data->regmap);
 		dev_err(&client->dev,
 			"Failed to allocate register map: %d\n", ret);
 		goto destroy_wq;
 	}
-
-	redriver->client = client;
-	i2c_set_clientdata(client, redriver);
+	redriver_data->client = client;
+	i2c_set_clientdata(client, redriver_data);
 
 	/* Set default parameters for A/B/C/D channels. */
-	ret = ssusb_redriver_default_config(redriver);
-	if (ret < 0)
-		goto destroy_wq;
+	ret = ssusb_redriver_default_config(redriver_data);
+	if (ret < 0) {
+		dev_err(&client->dev,
+			"Failed to Set default parameters: %d\n", ret);
+	}
 
 	/* Set id_state as float by default*/
-	redriver->host_active = false;
+	redriver_data->host_active = false;
 
 	/* Set to USB by default */
-	redriver->op_mode = OP_MODE_USB;
+	redriver_data->op_mode = OP_MODE_USB;
 
-	redriver->usb_psy = power_supply_get_by_name("usb");
-	if (!redriver->usb_psy) {
+	redriver_data->usb_psy = power_supply_get_by_name("usb");
+	if (!redriver_data->usb_psy) {
 		dev_warn(&client->dev, "Could not get usb power_supply\n");
 		pval.intval = -EINVAL;
 	} else {
-		power_supply_get_property(redriver->usb_psy,
+		power_supply_get_property(redriver_data->usb_psy,
 			POWER_SUPPLY_PROP_PRESENT, &pval);
 
 		/* USB cable is not connected */
 		if (!pval.intval)
-			ssusb_redriver_gen_dev_set(redriver, false);
+			ssusb_redriver_gen_dev_set(redriver_data, false);
 	}
-
-	ret = ssusb_redriver_extcon_register(redriver);
+	ret = ssusb_redriver_extcon_register(redriver_data);
 	if (ret)
 		goto put_psy;
 
-	redriver->panic_nb.notifier_call = ssusb_redriver_panic_notifier;
+	redriver_data->panic_nb.notifier_call = ssusb_redriver_panic_notifier;
 	atomic_notifier_chain_register(&panic_notifier_list,
-			&redriver->panic_nb);
+			&redriver_data->panic_nb);
 
-	ssusb_redriver_debugfs_entries(redriver);
+	ssusb_redriver_debugfs_entries(redriver_data);
 
 	dev_dbg(&client->dev, "USB 3.1 Gen1/Gen2 Re-Driver Probed.\n");
 
 	return 0;
 
 put_psy:
-	if (redriver->usb_psy)
-		power_supply_put(redriver->usb_psy);
+	if (redriver_data->usb_psy)
+		power_supply_put(redriver_data->usb_psy);
 
 destroy_wq:
-	destroy_workqueue(redriver->redriver_wq);
+	destroy_workqueue(redriver_data->redriver_wq);
 
 	return ret;
 }
@@ -888,6 +905,7 @@ static ssize_t channel_config_write(struct file *file,
 	if (copy_from_user(&buf, ubuf, min_t(size_t, sizeof(buf) - 1, count)))
 		return -EFAULT;
 
+	pr_err("%s: buf=%s, strlen=%d\n", __func__, buf, strlen(buf));
 	if (isdigit(buf[0])) {
 		ret = config_func(redriver, CHANNEL_NUM * CHAN_MODE_NUM,
 				buf[0] - '0');

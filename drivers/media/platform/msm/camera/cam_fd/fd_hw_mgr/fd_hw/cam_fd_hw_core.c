@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -427,7 +427,6 @@ static int cam_fd_hw_util_processcmd_frame_done(struct cam_hw_info *fd_hw,
 	unsigned long flags;
 	int i;
 
-	mutex_lock(&fd_hw->hw_mutex);
 	spin_lock_irqsave(&fd_core->spin_lock, flags);
 	if ((fd_core->core_state != CAM_FD_CORE_STATE_IDLE) ||
 		(fd_core->results_valid == false) ||
@@ -437,7 +436,6 @@ static int cam_fd_hw_util_processcmd_frame_done(struct cam_hw_info *fd_hw,
 			fd_core->core_state, fd_core->results_valid,
 			fd_core->hw_req_private);
 		spin_unlock_irqrestore(&fd_core->spin_lock, flags);
-		mutex_unlock(&fd_hw->hw_mutex);
 		return -EINVAL;
 	}
 	fd_core->core_state = CAM_FD_CORE_STATE_READING_RESULTS;
@@ -518,62 +516,7 @@ static int cam_fd_hw_util_processcmd_frame_done(struct cam_hw_info *fd_hw,
 	fd_core->hw_req_private = NULL;
 	fd_core->core_state = CAM_FD_CORE_STATE_IDLE;
 	spin_unlock_irqrestore(&fd_core->spin_lock, flags);
-	mutex_unlock(&fd_hw->hw_mutex);
 
-	return 0;
-}
-
-static int cam_fd_hw_util_processcmd_hw_dump(struct cam_hw_info *fd_hw,
-	void *args)
-{
-	struct cam_fd_hw_dump_args *dump_args;
-	struct cam_hw_soc_info *soc_info;
-	int i, j;
-	char *dst;
-	uint32_t *addr, *start;
-	struct cam_fd_hw_dump_header *hdr;
-	uint32_t num_reg, min_len, remain_len;
-
-	mutex_lock(&fd_hw->hw_mutex);
-	if (fd_hw->hw_state == CAM_HW_STATE_POWER_DOWN) {
-		CAM_INFO(CAM_FD, "power off state");
-		mutex_unlock(&fd_hw->hw_mutex);
-		return 0;
-	}
-
-	dump_args = (struct cam_fd_hw_dump_args *)args;
-	soc_info = &fd_hw->soc_info;
-	remain_len = dump_args->buf_len - dump_args->offset;
-	min_len =  2 * (sizeof(struct cam_fd_hw_dump_header) +
-		    CAM_FD_HW_DUMP_TAG_MAX_LEN) +
-		    soc_info->reg_map[0].size;
-	if (remain_len < min_len) {
-		CAM_ERR(CAM_FD, "dump buffer exhaust %d %d",
-			remain_len, min_len);
-		mutex_unlock(&fd_hw->hw_mutex);
-		return 0;
-	}
-	dst = (char *)dump_args->cpu_addr + dump_args->offset;
-	hdr = (struct cam_fd_hw_dump_header *)dst;
-	snprintf(hdr->tag, CAM_FD_HW_DUMP_TAG_MAX_LEN,
-		"FD_REG:");
-	hdr->word_size = sizeof(uint32_t);
-	addr = (uint32_t *)(dst + sizeof(struct cam_fd_hw_dump_header));
-	start = addr;
-	*addr++ = soc_info->index;
-	for (j = 0; j < soc_info->num_reg_map; j++) {
-		num_reg = soc_info->reg_map[j].size/4;
-		for (i = 0; i < num_reg; i++) {
-			*addr++ = soc_info->mem_block[j]->start + i*4;
-			*addr++ = cam_io_r(soc_info->reg_map[j].mem_base +
-				(i*4));
-		}
-	}
-	mutex_unlock(&fd_hw->hw_mutex);
-	hdr->size = hdr->word_size * (addr - start);
-	dump_args->offset += hdr->size +
-		sizeof(struct cam_fd_hw_dump_header);
-	CAM_DBG(CAM_FD, "%d", dump_args->offset);
 	return 0;
 }
 
@@ -1217,9 +1160,8 @@ int cam_fd_hw_process_cmd(void *hw_priv, uint32_t cmd_type,
 			cmd_frame_results);
 		break;
 	}
-	case CAM_FD_HW_CMD_HW_DUMP: {
-		rc = cam_fd_hw_util_processcmd_hw_dump(fd_hw,
-			cmd_args);
+	case CAM_FD_HW_CMD_REGISTER_DUMP: {
+		cam_fd_soc_register_dump(fd_hw);
 		break;
 	}
 	default:

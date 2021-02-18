@@ -68,6 +68,10 @@
 #include <linux/debugfs.h>
 #include <linux/uaccess.h>
 
+#ifdef CONFIG_SEC_DEBUG
+#include <linux/sec_debug.h>
+#endif
+
 /*
  * Apparently, some Qualcomm arm64 platforms which appear to expose their SMMU
  * global register space are still, in fact, using a hypervisor to mediate it
@@ -1300,7 +1304,8 @@ static int __arm_smmu_tlb_sync(struct arm_smmu_device *smmu,
 	}
 	trace_tlbsync_timeout(smmu->dev, 0);
 	__arm_smmu_tlb_sync_timeout(smmu);
-	return -EINVAL;
+	dev_err_ratelimited(smmu->dev, "apps_smmu_scr0 = 0x%x, apps_smmu_inv_status = 0x%x \n", scm_io_read(0x15000000), scm_io_read(0x1500251C)); 
+	return -EINVAL; 
 }
 
 static void arm_smmu_tlb_sync_global(struct arm_smmu_device *smmu)
@@ -1662,6 +1667,45 @@ static phys_addr_t arm_smmu_verify_fault(struct iommu_domain *domain,
 	return (phys == 0 ? phys_post_tlbiall : phys);
 }
 
+static char* arm_smmu_get_devname(struct arm_smmu_domain *smmu_domain, u32 sid)
+{
+	struct iommu_fwspec *fwspec = NULL;
+	struct device* dev = NULL;
+	u32 i;
+	char *colon, *comma, *dot, *ch = NULL;
+
+	if (smmu_domain->dev)
+		fwspec = smmu_domain->dev->iommu_fwspec;
+
+	for (i = 0; fwspec && i < fwspec->num_ids; i++) {
+		if ((fwspec->ids[i] & smmu_domain->smmu->streamid_mask) == sid) {
+			dev = smmu_domain->dev;
+			break;
+		}
+	}
+
+	if (dev) {
+		if (dev_is_pci(dev))
+			return (char *)dev_name(dev);
+			
+		colon = strrchr(dev_name(dev), ':');
+		comma = strrchr(dev_name(dev), ',');
+		dot = strrchr(dev_name(dev), '.');
+
+		if (colon == NULL && comma == NULL && dot == NULL)
+			return (char *)dev_name(dev);
+		
+		if (colon > comma)
+			ch = colon;
+		else
+			ch = comma;
+
+		return dot > ch ? dot + 1 : ch + 1;
+	}
+
+	return "No Device";
+}
+
 static irqreturn_t arm_smmu_context_fault(int irq, void *dev)
 {
 	int flags, ret, tmp;
@@ -1699,6 +1743,9 @@ static irqreturn_t arm_smmu_context_fault(int irq, void *dev)
 	if (fatal_asf && (fsr & FSR_ASF)) {
 		dev_err(smmu->dev,
 			"Took an address size fault.  Refusing to recover.\n");
+
+		sec_debug_save_smmu_info_asf_fatal();
+
 		BUG();
 	}
 
@@ -1760,7 +1807,10 @@ static irqreturn_t arm_smmu_context_fault(int irq, void *dev)
 		if (!non_fatal_fault) {
 			dev_err(smmu->dev,
 				"Unhandled arm-smmu context fault!\n");
-			BUG();
+
+			sec_debug_save_smmu_info_fatal();
+			// BUG();
+			panic("%s SMMU Fault - SID=0x%x", arm_smmu_get_devname(smmu_domain, frsynra), frsynra);
 		}
 	}
 

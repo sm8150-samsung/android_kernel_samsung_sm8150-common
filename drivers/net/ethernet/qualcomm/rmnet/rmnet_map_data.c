@@ -1203,7 +1203,7 @@ int rmnet_map_process_next_hdr_packet(struct sk_buff *skb,
 
 long rmnet_agg_time_limit __read_mostly = 1000000L;
 long rmnet_agg_bypass_time __read_mostly = 10000000L;
-
+extern void ipa_pm_update_last_icmp_sent(u64 time);
 int rmnet_map_tx_agg_skip(struct sk_buff *skb, int offset)
 {
 	u8 *packet_start = skb->data + offset;
@@ -1229,6 +1229,10 @@ int rmnet_map_tx_agg_skip(struct sk_buff *skb, int offset)
 		}
 	}
 
+	if (is_icmp) {
+		// call to ipa
+		ipa_pm_update_last_icmp_sent(local_clock());
+	}
 	return is_icmp;
 }
 
@@ -1429,6 +1433,9 @@ new_packet:
 		size = port->egress_agg_params.agg_size - skb->len;
 
 		if (diff.tv_sec > 0 || diff.tv_nsec > rmnet_agg_bypass_time ||
+#if defined(CONFIG_ARGOS)
+			!rmnet_data_tx_aggr_enabled ||
+#endif
 		    size <= 0) {
 			spin_unlock_irqrestore(&port->agg_lock, flags);
 			skb->protocol = htons(ETH_P_MAP);

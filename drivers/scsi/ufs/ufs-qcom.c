@@ -18,6 +18,7 @@
 #include <linux/phy/phy.h>
 #include <linux/phy/phy-qcom-ufs.h>
 #include <linux/clk/qcom.h>
+#include <linux/clk-provider.h>
 
 #ifdef CONFIG_QCOM_BUS_SCALING
 #include <linux/msm-bus.h>
@@ -31,6 +32,7 @@
 #include "ufs-qcom-debugfs.h"
 #include "ufs_quirks.h"
 #include "ufshcd-crypto-qti.h"
+#include "../../phy/qualcomm/phy-qcom-ufs-i.h"
 
 #define MAX_PROP_SIZE		   32
 #define VDDP_REF_CLK_MIN_UV        1200000
@@ -305,10 +307,15 @@ static int ufs_qcom_power_up_sequence(struct ufs_hba *hba)
 	}
 
 	ret = ufs_qcom_phy_is_pcs_ready(phy);
-	if (ret)
+	if (ret) {
 		dev_err(hba->dev,
 			"%s: is_physical_coding_sublayer_ready() failed, ret = %d\n",
 			__func__, ret);
+		ufshcd_print_ufs_clk_state(hba);
+		ufshcd_print_phy_clk_state(hba);
+		ufshcd_print_phy_regs(hba);
+		BUG_ON(1);
+	}
 
 	ufs_qcom_select_unipro_mode(host);
 
@@ -821,8 +828,10 @@ static int ufs_qcom_suspend(struct ufs_hba *hba, enum ufs_pm_op pm_op)
 {
 	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
 	struct phy *phy = host->generic_phy;
+	struct ufs_qcom_phy *qphy;
 	int ret = 0;
 
+	qphy = (struct ufs_qcom_phy*)phy_get_drvdata(phy);
 	/*
 	 * If UniPro link is not active or OFF, PHY ref_clk, main PHY analog
 	 * power rail and low noise analog power rail for PLL can be
@@ -830,9 +839,13 @@ static int ufs_qcom_suspend(struct ufs_hba *hba, enum ufs_pm_op pm_op)
 	 */
 	if (!ufs_qcom_is_link_active(hba)) {
 		ufs_qcom_disable_lane_clks(host);
-		if (host->is_phy_pwr_on) {
-			phy_power_off(phy);
-			host->is_phy_pwr_on = false;
+		if (qphy->is_powered_on && phy->power_count) {
+			ret = phy_power_off(phy);
+			if (ret) {
+				dev_err(hba->dev, "%s: failed disabling regs, err = %d\n",
+						__func__, ret);
+				goto out;
+			}
 		}
 		if (host->vddp_ref_clk && ufs_qcom_is_link_off(hba))
 			ret = ufs_qcom_disable_vreg(hba->dev,
@@ -858,16 +871,18 @@ static int ufs_qcom_resume(struct ufs_hba *hba, enum ufs_pm_op pm_op)
 {
 	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
 	struct phy *phy = host->generic_phy;
+	struct ufs_qcom_phy *qphy;
 	int err;
 
-	if (!host->is_phy_pwr_on) {
+	qphy = (struct ufs_qcom_phy*)phy_get_drvdata(phy);
+
+	if (!qphy->is_powered_on && !phy->power_count) {
 		err = phy_power_on(phy);
 		if (err) {
 			dev_err(hba->dev, "%s: failed enabling regs, err = %d\n",
 				__func__, err);
 			goto out;
 		}
-		host->is_phy_pwr_on = true;
 	}
 	if (host->vddp_ref_clk && (hba->rpm_lvl > UFS_PM_LVL_3 ||
 				   hba->spm_lvl > UFS_PM_LVL_3))
@@ -888,7 +903,16 @@ out:
 
 static int ufs_qcom_full_reset(struct ufs_hba *hba)
 {
+	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
 	int ret = -ENOTSUPP;
+
+	host->hw_reset_count++;
+	host->last_hw_reset = (unsigned long)ktime_to_us(ktime_get());
+	host->hw_reset_saved_err = hba->saved_err;
+	host->hw_reset_saved_uic_err = hba->saved_uic_err;
+	host->hw_reset_outstanding_tasks = hba->outstanding_tasks;
+	host->hw_reset_outstanding_reqs = hba->outstanding_reqs;
+	memcpy(&host->hw_reset_ufs_stats, &hba->ufs_stats, sizeof(struct ufs_stats));
 
 	if (!hba->core_reset) {
 		dev_err(hba->dev, "%s: failed, err = %d\n", __func__,
@@ -1506,6 +1530,9 @@ static int ufs_qcom_setup_clocks(struct ufs_hba *hba, bool on,
 				 enum ufs_notify_change_status status)
 {
 	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
+	struct phy *phy = NULL;
+	struct ufs_qcom_phy *qphy;
+	int err = 0;
 
 	/*
 	 * In case ufs_qcom_init() is not yet done, simply ignore.
@@ -1515,10 +1542,18 @@ static int ufs_qcom_setup_clocks(struct ufs_hba *hba, bool on,
 	if (!host)
 		return 0;
 
+	phy = host->generic_phy;
+
+	qphy = (struct ufs_qcom_phy*)phy_get_drvdata(phy);
+
 	if (on && (status == POST_CHANGE)) {
-		if (!host->is_phy_pwr_on) {
-			phy_power_on(host->generic_phy);
-			host->is_phy_pwr_on = true;
+		if (!qphy->is_powered_on && !phy->power_count) {
+			err = phy_power_on(phy);
+			if (err) {
+				dev_err(hba->dev, "%s: failed enabling regs, err = %d\n",
+						__func__, err);
+				goto out;
+			}
 		}
 		/* enable the device ref clock for HS mode*/
 		if (ufshcd_is_hs_mode(&hba->pwr_info))
@@ -1536,14 +1571,19 @@ static int ufs_qcom_setup_clocks(struct ufs_hba *hba, bool on,
 			ufs_qcom_dev_ref_clk_ctrl(host, false);
 
 			/* powering off PHY during aggressive clk gating */
-			if (host->is_phy_pwr_on) {
-				phy_power_off(host->generic_phy);
-				host->is_phy_pwr_on = false;
+			if (qphy->is_powered_on && phy->power_count) {
+				err = phy_power_off(phy);
+				if (err) {
+					dev_err(hba->dev, "%s: failed disabling regs, err = %d\n",
+							__func__, err);
+					goto out;
+				}
 			}
 		}
 	}
 
-	return 0;
+out:
+	return err;
 }
 
 #ifdef CONFIG_SMP /* CONFIG_SMP */
@@ -1948,6 +1988,19 @@ __setup("androidboot.bootdevice=", get_android_boot_dev);
 #endif
 
 /*
+ * ufs_qcom_parse_enable_tw - read from DTS whether TW should be enabled.
+ */
+static void ufs_qcom_parse_enable_tw(struct ufs_qcom_host *host)
+{
+	struct device_node *node = host->hba->dev->of_node;
+
+	if (of_find_property(node, "enable_tw", NULL)) {
+		host->enable_tw = true;
+		dev_info(host->hba->dev, "host supports UFS Turbo Write\n");
+	}
+}
+
+/*
  * ufs_qcom_parse_lpm - read from DTS whether LPM modes should be disabled.
  */
 static void ufs_qcom_parse_lpm(struct ufs_qcom_host *host)
@@ -2176,6 +2229,7 @@ static int ufs_qcom_init(struct ufs_hba *hba)
 	ufs_qcom_parse_lpm(host);
 	if (host->disable_lpm)
 		pm_runtime_forbid(host->hba->dev);
+	ufs_qcom_parse_enable_tw(host);
 	ufs_qcom_set_caps(hba);
 	ufs_qcom_advertise_quirks(hba);
 
@@ -2208,18 +2262,32 @@ out_variant_clear:
 	devm_kfree(dev, host);
 	ufshcd_set_variant(hba, NULL);
 out:
+	/*
+	 * host->hw_reset_count's default is -1
+	 * because full_reset is called 1 time on ufshcd_hba_probe()
+	 */
+	if (host)
+		host->hw_reset_count = -1;
+
 	return err;
 }
 
 static void ufs_qcom_exit(struct ufs_hba *hba)
 {
 	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
+	struct phy *phy = host->generic_phy;
+	struct ufs_qcom_phy *qphy;
+	int err = 0;
+
+	qphy = (struct ufs_qcom_phy*)phy_get_drvdata(phy);
 
 	msm_bus_scale_unregister_client(host->bus_vote.client_handle);
 	ufs_qcom_disable_lane_clks(host);
-	if (host->is_phy_pwr_on) {
-		phy_power_off(host->generic_phy);
-		host->is_phy_pwr_on = false;
+	if (qphy->is_powered_on && phy->power_count) {
+		err = phy_power_off(phy);
+		if (err)
+			dev_err(hba->dev, "%s: failed disabling regs, err = %d\n",
+					__func__, err);
 	}
 	phy_exit(host->generic_phy);
 	ufs_qcom_pm_qos_remove(host);
@@ -2650,15 +2718,79 @@ static void ufs_qcom_dump_dbg_regs(struct ufs_hba *hba, bool no_sleep)
 		return;
 
 	/* sleep a bit intermittently as we are dumping too much data */
-	usleep_range(1000, 1100);
+	udelay(1000);
 	ufs_qcom_testbus_read(hba);
-	usleep_range(1000, 1100);
+	udelay(1000);
 	ufs_qcom_print_unipro_testbus(hba);
-	usleep_range(1000, 1100);
+	udelay(1000);
 	ufs_qcom_print_utp_hci_testbus(hba);
-	usleep_range(1000, 1100);
+	udelay(1000);
 	ufs_qcom_phy_dbg_register_dump(phy);
-	usleep_range(1000, 1100);
+	udelay(1000);
+}
+
+static void ufs_qcom_phy_clk_state(struct ufs_hba *hba)
+{
+	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
+	struct phy *phy = host->generic_phy;
+	struct ufs_qcom_phy *qphy;
+	struct clk_hw *ufs_clk_hw;
+
+	qphy = (struct ufs_qcom_phy*)phy_get_drvdata(phy);
+
+	if (!IS_ERR_OR_NULL(qphy->tx_iface_clk)) {
+		ufs_clk_hw = __clk_get_hw(qphy->tx_iface_clk);
+		dev_err(hba->dev, "%s: prep/enable (%s/%s), rate (%d)\n",
+				__clk_get_name(qphy->tx_iface_clk),
+				clk_hw_is_prepared(ufs_clk_hw) ? "TRUE" : "FALSE",
+				clk_hw_is_enabled(ufs_clk_hw) ? "TRUE" : "FALSE",
+				clk_hw_get_rate(ufs_clk_hw));
+	}
+
+	if (!IS_ERR_OR_NULL(qphy->rx_iface_clk)) {
+		ufs_clk_hw = __clk_get_hw(qphy->rx_iface_clk);
+		dev_err(hba->dev, "%s: prep/enable (%s/%s), rate (%d)\n",
+				__clk_get_name(qphy->rx_iface_clk),
+				clk_hw_is_prepared(ufs_clk_hw) ? "TRUE" : "FALSE",
+				clk_hw_is_enabled(ufs_clk_hw) ? "TRUE" : "FALSE",
+				clk_hw_get_rate(ufs_clk_hw));
+	}
+
+	if (!IS_ERR_OR_NULL(qphy->ref_clk_src)) {
+		ufs_clk_hw = __clk_get_hw(qphy->ref_clk_src);
+		dev_err(hba->dev, "%s: prep/enable (%s/%s), rate (%d)\n",
+				__clk_get_name(qphy->ref_clk_src),
+				clk_hw_is_prepared(ufs_clk_hw) ? "TRUE" : "FALSE",
+				clk_hw_is_enabled(ufs_clk_hw) ? "TRUE" : "FALSE",
+				clk_hw_get_rate(ufs_clk_hw));
+	}
+
+	if (!IS_ERR_OR_NULL(qphy->ref_clk_parent)) {
+		ufs_clk_hw = __clk_get_hw(qphy->ref_clk_parent);
+		dev_err(hba->dev, "%s: prep/enable (%s/%s), rate (%d)\n",
+				__clk_get_name(qphy->ref_clk_parent),
+				clk_hw_is_prepared(ufs_clk_hw) ? "TRUE" : "FALSE",
+				clk_hw_is_enabled(ufs_clk_hw) ? "TRUE" : "FALSE",
+				clk_hw_get_rate(ufs_clk_hw));
+	}
+
+	if (!IS_ERR_OR_NULL(qphy->ref_clk)) {
+		ufs_clk_hw = __clk_get_hw(qphy->ref_clk);
+		dev_err(hba->dev, "%s: prep/enable (%s/%s), rate (%d)\n",
+				__clk_get_name(qphy->ref_clk),
+				clk_hw_is_prepared(ufs_clk_hw) ? "TRUE" : "FALSE",
+				clk_hw_is_enabled(ufs_clk_hw) ? "TRUE" : "FALSE",
+				clk_hw_get_rate(ufs_clk_hw));
+	}
+
+	if (!IS_ERR_OR_NULL(qphy->ref_aux_clk)) {
+		ufs_clk_hw = __clk_get_hw(qphy->ref_aux_clk);
+		dev_err(hba->dev, "%s: prep/enable (%s/%s), rate (%d)\n",
+				__clk_get_name(qphy->ref_aux_clk),
+				clk_hw_is_prepared(ufs_clk_hw) ? "TRUE" : "FALSE",
+				clk_hw_is_enabled(ufs_clk_hw) ? "TRUE" : "FALSE",
+				clk_hw_get_rate(ufs_clk_hw));
+	}
 }
 
 /**
@@ -2684,6 +2816,7 @@ static struct ufs_hba_variant_ops ufs_hba_qcom_vops = {
 	.get_scale_down_gear	= ufs_qcom_get_scale_down_gear,
 	.set_bus_vote		= ufs_qcom_set_bus_vote,
 	.dbg_register_dump	= ufs_qcom_dump_dbg_regs,
+	.phy_clk_state	= ufs_qcom_phy_clk_state,
 #ifdef CONFIG_DEBUG_FS
 	.add_debugfs		= ufs_qcom_dbg_add_debugfs,
 #endif

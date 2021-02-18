@@ -33,6 +33,7 @@
 #include <linux/sync_file.h>
 
 #include "drm_crtc_internal.h"
+#include "msm/sde/sde_trace.h"
 
 void __drm_crtc_commit_free(struct kref *kref)
 {
@@ -2247,6 +2248,7 @@ int drm_mode_atomic_ioctl(struct drm_device *dev,
 			(arg->flags & DRM_MODE_PAGE_FLIP_EVENT))
 		return -EINVAL;
 
+	SDE_ATRACE_BEGIN("drm_mode_atomic_ioctl");
 	drm_modeset_acquire_init(&ctx, 0);
 
 	state = drm_atomic_state_alloc(dev);
@@ -2369,5 +2371,6 @@ out:
 	drm_modeset_drop_locks(&ctx);
 	drm_modeset_acquire_fini(&ctx);
 
+	SDE_ATRACE_END("drm_mode_atomic_ioctl");
 	return ret;
 }

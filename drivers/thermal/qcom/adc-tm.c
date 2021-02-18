@@ -339,7 +339,7 @@ static int adc_tm_probe(struct platform_device *pdev)
 	while (channels[indio_chan_count].indio_dev)
 		indio_chan_count++;
 
-	if (indio_chan_count != dt_chan_num) {
+	if (indio_chan_count < dt_chan_num) {
 		dev_err(dev, "VADC IIO channel missing in main node\n");
 		return -EINVAL;
 	}

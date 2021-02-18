@@ -98,7 +98,6 @@
 			snps,has-lpm-erratum;
 			snps,hird-threshold = /bits/ 8 <0x10>;
 			snps,ssp-u3-u0-quirk;
-			snps,usb3-u1u2-disable;
 			usb-core-id = <0>;
 			tx-fifo-resize;
 			maximum-speed = "super-speed-plus";
@@ -318,7 +317,8 @@
 			 USB3_DP_PCS_CLAMP_ENABLE
 			 USB3_DP_PCS_PCS_STATUS2
 			 USB3_DP_PCS_INSIG_SW_CTRL3
-			 USB3_DP_PCS_INSIG_MX_CTRL3>;
+			 USB3_DP_PCS_INSIG_MX_CTRL3
+			 USB3_DP_QSERDES_COM_CMN_STATUS>;
 
 		clocks = <&clock_gcc GCC_USB3_PRIM_PHY_AUX_CLK>,
 			<&clock_gcc GCC_USB3_PRIM_PHY_PIPE_CLK>,

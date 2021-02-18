@@ -266,6 +266,8 @@ static unsigned int mhi_uci_poll(struct file *file, poll_table *wait)
 	return mask;
 }
 
+static int read_raw_data = 0;
+
 static ssize_t mhi_uci_write(struct file *file,
 			     const char __user *buf,
 			     size_t count,
@@ -276,6 +278,7 @@ static ssize_t mhi_uci_write(struct file *file,
 	struct uci_chan *uci_chan = &uci_dev->ul_chan;
 	size_t bytes_xfered = 0;
 	int ret, nr_avail;
+	char cmd_id = 0xFF;
 
 	if (!buf || !count)
 		return -EINVAL;
@@ -328,6 +331,20 @@ static ssize_t mhi_uci_write(struct file *file,
 		else
 			flags = MHI_EOT;
 
+		cmd_id = *(char *)kbuf;
+		if (uci_dev->mhi_dev->ul_chan_id == 10) {
+			cmd_id = *(char *)kbuf;
+			if (cmd_id == 0xa)
+				read_raw_data = 1; /* data coming from the target is raw data */
+			else if ((read_raw_data == 1) && (cmd_id == 0x7)) /* data transfer has been finished */
+				read_raw_data = 0;
+			switch (cmd_id) {
+				case 0x2: MSG_LOG("EFS SAHARA Hello Response --->\n"); break;
+				case 0xa: MSG_LOG("EFS SAHARA Data Read Request --->\n"); break;
+				case 0x7: MSG_LOG("EFS SAHARA Reset --->\n"); break;
+			}
+		}
+
 		if (uci_dev->enabled)
 			ret = mhi_queue_transfer(mhi_dev, DMA_TO_DEVICE, kbuf,
 						 xfer_size, flags);
@@ -367,6 +384,7 @@ static ssize_t mhi_uci_read(struct file *file,
 	char *ptr;
 	size_t to_copy;
 	int ret = 0;
+	char cmd_id = 0xFF;
 
 	if (!buf)
 		return -EINVAL;
@@ -422,6 +440,18 @@ static ssize_t mhi_uci_read(struct file *file,
 	/* Copy the buffer to user space */
 	to_copy = min_t(size_t, count, uci_chan->rx_size);
 	ptr = uci_buf->data + (uci_buf->len - uci_chan->rx_size);
+
+	if (uci_dev->mhi_dev->ul_chan_id == 10) {
+		cmd_id = *(char *)ptr;
+		if (!read_raw_data) {
+			switch (cmd_id) {
+				case 0x1: MSG_LOG("EFS SAHARA <--- Hello \n"); break;
+				case 0x9: MSG_LOG("EFS SAHARA <--- Data Store Request \n"); break;
+				case 0x8: MSG_LOG("EFS SAHARA <--- Reset Response \n"); break;
+			}
+		}
+	}
+		
 	ret = copy_to_user(buf, ptr, to_copy);
 	if (ret)
 		return ret;

@@ -49,6 +49,10 @@ static struct inode *f2fs_new_inode(struct inode *dir, umode_t mode)
 
 	inode->i_ino = ino;
 	inode->i_blocks = 0;
+
+	if (IS_I_VERSION(inode))
+		inode->i_version++;
+
 	inode->i_mtime = inode->i_atime = inode->i_ctime =
 			F2FS_I(inode)->i_crtime = current_time(inode);
 	inode->i_generation = prandom_u32();
@@ -482,7 +486,7 @@ static struct dentry *f2fs_lookup(struct inode *dir, struct dentry *dentry,
 	nid_t ino = -1;
 	int err = 0;
 	unsigned int root_ino = F2FS_ROOT_INO(F2FS_I_SB(dir));
-	struct fscrypt_name fname;
+	struct f2fs_filename fname;
 
 	trace_f2fs_lookup_start(dir, dentry, flags);
 
@@ -491,31 +495,42 @@ static struct dentry *f2fs_lookup(struct inode *dir, struct dentry *dentry,
 		goto out;
 	}
 
-	err = fscrypt_prepare_lookup(dir, dentry, &fname);
+	err = f2fs_prepare_lookup(dir, dentry, &fname);
 	generic_set_encrypted_ci_d_ops(dir, dentry);
 	if (err == -ENOENT)
 		goto out_splice;
 	if (err)
 		goto out;
 	de = __f2fs_find_entry(dir, &fname, &page);
-	fscrypt_free_filename(&fname);
+	f2fs_free_filename(&fname);
 
 	if (!de) {
 		if (IS_ERR(page)) {
 			err = PTR_ERR(page);
 			goto out;
 		}
+		err = -ENOENT;
 		goto out_splice;
 	}
 
 	ino = le32_to_cpu(de->ino);
-	f2fs_put_page(page, 0);
 
 	inode = f2fs_iget(dir->i_sb, ino);
 	if (IS_ERR(inode)) {
+		if (PTR_ERR(inode) != -ENOMEM) {
+			struct f2fs_sb_info *sbi = F2FS_I_SB(dir);
+
+			printk_ratelimited(KERN_ERR "F2FS-fs: Invalid inode referenced: %u"
+					"at parent inode : %lu\n",ino, dir->i_ino);
+			print_block_data(sbi->sb, page->index,
+					page_address(page), 0, F2FS_BLKSIZE);
+			f2fs_bug_on(sbi, 1);
+		}
+		f2fs_put_page(page, 0);
 		err = PTR_ERR(inode);
 		goto out;
 	}
+	f2fs_put_page(page, 0);
 
 	if ((dir->i_ino == root_ino) && f2fs_has_inline_dots(dir)) {
 		err = __recover_dot_dentries(dir, root_ino);
@@ -550,7 +565,7 @@ out_splice:
 #endif
 	new = d_splice_alias(inode, dentry);
 	err = PTR_ERR_OR_ZERO(new);
-	trace_f2fs_lookup_end(dir, dentry, ino, err);
+	trace_f2fs_lookup_end(dir, dentry, ino, !new ? -ENOENT : err);
 	return new;
 out_iput:
 	iput(inode);
@@ -565,7 +580,7 @@ static int f2fs_unlink(struct inode *dir, struct dentry *dentry)
 	struct inode *inode = d_inode(dentry);
 	struct f2fs_dir_entry *de;
 	struct page *page;
-	int err = -ENOENT;
+	int err;
 
 	trace_f2fs_unlink_enter(dir, dentry);
 
@@ -1288,9 +1303,7 @@ const struct inode_operations f2fs_encrypted_symlink_inode_operations = {
 	.get_link       = f2fs_encrypted_get_link,
 	.getattr	= f2fs_getattr,
 	.setattr	= f2fs_setattr,
-#ifdef CONFIG_F2FS_FS_XATTR
 	.listxattr	= f2fs_listxattr,
-#endif
 };
 
 const struct inode_operations f2fs_dir_inode_operations = {
@@ -1308,9 +1321,7 @@ const struct inode_operations f2fs_dir_inode_operations = {
 	.setattr	= f2fs_setattr,
 	.get_acl	= f2fs_get_acl,
 	.set_acl	= f2fs_set_acl,
-#ifdef CONFIG_F2FS_FS_XATTR
 	.listxattr	= f2fs_listxattr,
-#endif
 	.fiemap		= f2fs_fiemap,
 };
 
@@ -1318,9 +1329,7 @@ const struct inode_operations f2fs_symlink_inode_operations = {
 	.get_link       = f2fs_get_link,
 	.getattr	= f2fs_getattr,
 	.setattr	= f2fs_setattr,
-#ifdef CONFIG_F2FS_FS_XATTR
 	.listxattr	= f2fs_listxattr,
-#endif
 };
 
 const struct inode_operations f2fs_special_inode_operations = {
@@ -1328,7 +1337,5 @@ const struct inode_operations f2fs_special_inode_operations = {
 	.setattr        = f2fs_setattr,
 	.get_acl	= f2fs_get_acl,
 	.set_acl	= f2fs_set_acl,
-#ifdef CONFIG_F2FS_FS_XATTR
 	.listxattr	= f2fs_listxattr,
-#endif
 };

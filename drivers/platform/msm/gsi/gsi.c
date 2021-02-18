@@ -213,7 +213,7 @@ static void gsi_channel_state_change_wait(unsigned long chan_hdl,
 			ctx->state = curr_state;
 			return;
 		}
-
+ 
 		GSIDBG("GSI wait on chan_hld=%lu irqtyp=%u state=%u intr=%u\n",
 			chan_hdl,
 			type,
@@ -1282,7 +1282,7 @@ int gsi_register_device(struct gsi_per_props *props, unsigned long *dev_hdl)
 		gsi_writel(0, gsi_ctx->base +
 			GSI_EE_n_CNTXT_MSI_BASE_MSB(gsi_ctx->per.ee));
 	}
-
+	
 	val = gsi_readl(gsi_ctx->base +
 			GSI_EE_n_GSI_STATUS_OFFS(gsi_ctx->per.ee));
 	if (val & GSI_EE_n_GSI_STATUS_ENABLED_BMSK)
@@ -2905,6 +2905,7 @@ int gsi_start_channel(unsigned long chan_hdl)
 
 	mutex_lock(&gsi_ctx->mlock);
 	reinit_completion(&ctx->compl);
+	
 
 	/* check if INTSET is in IRQ mode for GPI channel */
 	val = gsi_readl(gsi_ctx->base +
@@ -2988,6 +2989,7 @@ int gsi_stop_channel(unsigned long chan_hdl)
 
 	mutex_lock(&gsi_ctx->mlock);
 	reinit_completion(&ctx->compl);
+	
 
 	/* check if INTSET is in IRQ mode for GPI channel */
 	val = gsi_readl(gsi_ctx->base +

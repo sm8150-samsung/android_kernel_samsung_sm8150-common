@@ -55,6 +55,21 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/trace_msm_low_power.h>
 
+#ifdef CONFIG_SEC_PM_DEBUG
+#include <linux/sec-pinmux.h>
+#ifdef CONFIG_SEC_GPIO_DVS
+#include <linux/secgpio_dvs.h>
+#endif
+#endif
+
+#ifdef CONFIG_SEC_DEBUG
+#include <linux/sec_debug.h>
+#endif
+
+#ifdef CONFIG_SEC_PM
+#include <linux/regulator/consumer.h>
+#endif
+
 #define SCLK_HZ (32768)
 #define PSCI_POWER_STATE(reset) (reset << 30)
 #define PSCI_AFFINITY_LEVEL(lvl) ((lvl & 0x3) << 24)
@@ -94,10 +109,51 @@ struct lpm_cluster *lpm_root_node;
 static bool lpm_prediction = true;
 module_param_named(lpm_prediction, lpm_prediction, bool, 0664);
 
+/*
+ * bias_hyst sysfs customizing for samsung kernel
+ *
+ * Change bias_hyst sysfs to update on QoS and get the value from QoS.
+ * Variable named bias_hyst is only using for sysfs node write and show.
+ * When selecting power, function is_cpu_biased(int cpu) check value from QoS.
+ */
 static uint32_t bias_hyst;
+/*
+ * Redundant definition of "bias_hyst" cause build error.
 module_param_named(bias_hyst, bias_hyst, uint, 0664);
+*/
 static bool lpm_ipi_prediction = true;
 module_param_named(lpm_ipi_prediction, lpm_ipi_prediction, bool, 0664);
+static struct pm_qos_request hist_bias_pm_qos_request;
+
+extern const struct kernel_param_ops param_ops_bias_hyst;
+static int param_set_bias_hyst(const char *val, const struct kernel_param *kp)
+{
+	unsigned int target;
+	int ret = kstrtouint(val, 0, &target);
+	if (ret != 0) {
+		return ret;
+	}
+	if (!pm_qos_request_active(&hist_bias_pm_qos_request)) {
+		pm_qos_add_request(&hist_bias_pm_qos_request, PM_QOS_HIST_BIAS, target);
+	} else {
+		pm_qos_update_request(&hist_bias_pm_qos_request, target);
+	}
+	*((unsigned int *)kp->arg) = target;
+	
+	return ret;
+}
+static int param_get_bias_hyst(char *buffer, const struct kernel_param *kp) \
+{
+	return scnprintf(buffer, PAGE_SIZE, "%u",
+			*((unsigned int *)kp->arg));
+}
+const struct kernel_param_ops param_ops_bias_hyst = {
+	.flags = 0,
+	.set = param_set_bias_hyst,
+	.get = param_get_bias_hyst,
+};
+
+module_param_cb(bias_hyst, &param_ops_bias_hyst, &bias_hyst, 0664);
 
 struct lpm_history {
 	uint32_t resi[MAXSAMPLES];
@@ -132,6 +188,13 @@ static void cluster_unprepare(struct lpm_cluster *cluster,
 static void cluster_prepare(struct lpm_cluster *cluster,
 		const struct cpumask *cpu, int child_idx, bool from_idle,
 		int64_t time);
+
+#ifdef CONFIG_SEC_PM_DEBUG
+extern void sec_gpio_debug_print(void);
+extern void msm_gpio_print_enabled(void);
+static int msm_pm_sleep_sec_debug;
+module_param_named(secdebug, msm_pm_sleep_sec_debug, int, 0664);
+#endif
 
 static bool print_parsed_dt;
 module_param_named(print_parsed_dt, print_parsed_dt, bool, 0664);
@@ -1127,6 +1190,11 @@ static int cluster_configure(struct lpm_cluster *cluster, int idx,
 		return -EPERM;
 
 	if (idx != cluster->default_level) {
+#ifdef CONFIG_SEC_DEBUG_POWER_LOG
+		sec_debug_cluster_lpm_log(cluster->cluster_name, idx,
+			cluster->num_children_in_sync.bits[0],
+			cluster->child_cpus.bits[0], from_idle, 1);
+#endif
 		update_debug_pc_event(CLUSTER_ENTER, idx,
 			cluster->num_children_in_sync.bits[0],
 			cluster->child_cpus.bits[0], from_idle);
@@ -1146,9 +1214,11 @@ static int cluster_configure(struct lpm_cluster *cluster, int idx,
 		 * This debug information is useful to know which are the
 		 * clocks that are enabled and preventing the system level
 		 * LPMs(XO and Vmin).
-		 */
+		 *
+		 * move to lpm_suspend_prepare due to BUG in atomic context
 		if (!from_idle)
 			clock_debug_print_enabled(true);
+		*/
 
 		cpu = get_next_online_cpu(from_idle);
 		cpumask_copy(&cpumask, cpumask_of(cpu));
@@ -1300,6 +1370,12 @@ static void cluster_unprepare(struct lpm_cluster *cluster,
 	trace_cluster_exit(cluster->cluster_name, cluster->last_level,
 			cluster->num_children_in_sync.bits[0],
 			cluster->child_cpus.bits[0], from_idle);
+
+#ifdef CONFIG_SEC_DEBUG_POWER_LOG
+	sec_debug_cluster_lpm_log(cluster->cluster_name, cluster->last_level,
+			cluster->num_children_in_sync.bits[0],
+			cluster->child_cpus.bits[0], from_idle, 0);
+#endif
 
 	last_level = cluster->last_level;
 	cluster->last_level = cluster->default_level;
@@ -1503,7 +1579,15 @@ static int lpm_cpuidle_enter(struct cpuidle_device *dev,
 	if (need_resched())
 		goto exit;
 
+/* FIXME : remove secdbg logging for reducing cpu hang issues */
+#if 0 //#ifdef CONFIG_SEC_DEBUG_POWER_LOG 
+	sec_debug_cpu_lpm_log(dev->cpu, idx, 0, 1);
+	sec_debug_sched_msg("+Idle(%s)", cpu->levels[idx].name);
 	success = psci_enter_sleep(cpu, idx, true);
+	sec_debug_sched_msg("-Idle(%s)", cpu->levels[idx].name);
+#else
+	success = psci_enter_sleep(cpu, idx, true);
+#endif
 
 exit:
 	end_time = ktime_to_ns(ktime_get());
@@ -1514,6 +1598,12 @@ exit:
 	dev->last_residency = ktime_us_delta(ktime_get(), start);
 	update_history(dev, idx);
 	trace_cpu_idle_exit(idx, success);
+
+/* FIXME : remove secdbg logging for reducing cpu hang issues */
+#if 0 //#ifdef CONFIG_SEC_DEBUG_POWER_LOG 
+	sec_debug_cpu_lpm_log(dev->cpu, idx, success, 0);
+#endif
+
 	if (lpm_prediction && cpu->lpm_prediction) {
 		histtimer_cancel();
 		clusttimer_cancel();
@@ -1745,6 +1835,40 @@ static void register_cluster_lpm_stats(struct lpm_cluster *cl,
 static int lpm_suspend_prepare(void)
 {
 	suspend_in_progress = true;
+
+#ifdef CONFIG_SEC_GPIO_DVS
+	/************************ Caution !!! ****************************
+	 * This functiongit a must be located in appropriate
+	 * SLEEP position in accordance with the specification
+	 * of each BB vendor.
+	 ************************ Caution !!! ****************************/
+	gpio_dvs_check_sleepgpio();
+#ifdef SECGPIO_SLEEP_DEBUGGING
+	/************************ Caution !!! ****************************/
+	/* This func. must be located in an appropriate position for
+	 * GPIO SLEEP debugging in accordance with the specification
+	 * of each BB vendor, and the func. must be called after calling
+	 * the function "gpio_dvs_check_sleepgpio"
+	 ************************ Caution !!! ****************************/
+	gpio_dvs_set_sleepgpio();
+#endif
+#endif
+
+#ifdef CONFIG_SEC_PM
+	regulator_showall_enabled();
+	clock_debug_print_enabled(true);
+
+	debug_masterstats_show("entry");
+	debug_rpmstats_show("entry");
+#endif
+
+#ifdef CONFIG_SEC_PM_DEBUG
+	if (msm_pm_sleep_sec_debug) {
+		msm_gpio_print_enabled();
+		sec_gpio_debug_print();
+	}
+#endif
+
 	lpm_stats_suspend_enter();
 
 	return 0;
@@ -1754,6 +1878,11 @@ static void lpm_suspend_wake(void)
 {
 	suspend_in_progress = false;
 	lpm_stats_suspend_exit();
+
+#ifdef CONFIG_SEC_PM
+	debug_rpmstats_show("exit");
+	debug_masterstats_show("exit");
+#endif
 }
 
 static int lpm_suspend_enter(suspend_state_t state)
@@ -1776,7 +1905,17 @@ static int lpm_suspend_enter(suspend_state_t state)
 	cpu_prepare(lpm_cpu, idx, false);
 	cluster_prepare(cluster, cpumask, idx, false, 0);
 
+#ifdef CONFIG_SEC_DEBUG_SCHED_LOG
+	if (idx > 0)
+		sec_debug_sched_msg("+Suspend(s:%d)", state);
+#endif
+
 	success = psci_enter_sleep(lpm_cpu, idx, false);
+
+#ifdef CONFIG_SEC_DEBUG_SCHED_LOG
+	if (idx > 0)
+		sec_debug_sched_msg("-Suspend(s:%d)", state);
+#endif
 
 	cluster_unprepare(cluster, cpumask, idx, false, 0, success);
 	cpu_unprepare(lpm_cpu, idx, false);

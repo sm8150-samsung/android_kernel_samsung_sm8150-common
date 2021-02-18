@@ -25,6 +25,7 @@
 #include <linux/reboot.h>
 #include <linux/slab.h>
 #include <linux/suspend.h>
+#include <soc/qcom/restart.h>
 
 #include <uapi/linux/psci.h>
 
@@ -262,7 +263,14 @@ static int get_set_conduit_method(struct device_node *np)
 
 static void psci_sys_reset(enum reboot_mode reboot_mode, const char *cmd)
 {
-	invoke_psci_fn(PSCI_0_2_FN_SYSTEM_RESET, 0, 0, 0);
+#ifdef CONFIG_SEC_DEBUG
+	do_early_panic_restart();
+#else
+	if (oops_in_progress)
+		do_early_panic_restart();
+	else
+		invoke_psci_fn(PSCI_0_2_FN_SYSTEM_RESET, 0, 0, 0);
+#endif
 }
 
 static void psci_sys_poweroff(void)

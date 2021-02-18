@@ -83,6 +83,7 @@
  * 500ms, this should be less than tag timeout
  */
 #define IPA_MHIP_HOLB_TMO 2000000
+#define IPA_MPM_NUM_OF_INIT_CMD_DESC 2
 
 enum mhip_re_type {
 	MHIP_RE_XFER = 0x2,
@@ -479,11 +480,55 @@ static void ipa_mpm_gsi_chan_err_cb(struct gsi_chan_err_notify *err_data)
 static int ipa_mpm_set_dma_mode(enum ipa_client_type src_pipe,
 	enum ipa_client_type dst_pipe, bool reset)
 {
-	int result = 0;
+	struct ipahal_imm_cmd_pyld *cmd_pyld[IPA_MPM_NUM_OF_INIT_CMD_DESC];
+	struct ipahal_imm_cmd_register_write reg_write_coal_close;
+	struct ipahal_reg_valmask valmask;
+	struct ipa3_desc desc[IPA_MPM_NUM_OF_INIT_CMD_DESC];
+	int i, num_cmd = 0, result = 0;
 	struct ipa_ep_cfg ep_cfg = { { 0 } };
 
 	IPA_MPM_FUNC_ENTRY();
 	IPA_MPM_DBG("DMA from %d to %d reset=%d\n", src_pipe, dst_pipe, reset);
+
+	memset(desc, 0, sizeof(desc));
+	memset(cmd_pyld, 0, sizeof(cmd_pyld));
+
+	/* First step is to clear IPA Pipeline before changing DMA mode */
+	if (ipa3_get_ep_mapping(src_pipe) != IPA_EP_NOT_ALLOCATED) {
+		i = ipa3_get_ep_mapping(src_pipe);
+		reg_write_coal_close.skip_pipeline_clear = false;
+		reg_write_coal_close.pipeline_clear_options = IPAHAL_HPS_CLEAR;
+		reg_write_coal_close.offset = ipahal_get_reg_ofst(
+			IPA_AGGR_FORCE_CLOSE);
+		ipahal_get_aggr_force_close_valmask(i, &valmask);
+		reg_write_coal_close.value = valmask.val;
+		reg_write_coal_close.value_mask = valmask.mask;
+		cmd_pyld[num_cmd] = ipahal_construct_imm_cmd(
+					IPA_IMM_CMD_REGISTER_WRITE,
+					&reg_write_coal_close, false);
+
+		if (!cmd_pyld[num_cmd]) {
+			IPA_MPM_ERR("failed to construct coal close IC\n");
+			result = -ENOMEM;
+			goto destroy_imm_cmd;
+		}
+		ipa3_init_imm_cmd_desc(&desc[num_cmd], cmd_pyld[num_cmd]);
+		++num_cmd;
+	}
+	/* NO-OP IC for ensuring that IPA pipeline is empty */
+	cmd_pyld[num_cmd] =
+		ipahal_construct_nop_imm_cmd(false, IPAHAL_HPS_CLEAR, false);
+	if (!cmd_pyld[num_cmd]) {
+		IPA_MPM_ERR("failed to construct NOP imm cmd\n");
+		result = -ENOMEM;
+		goto destroy_imm_cmd;
+	}
+
+	result = ipa3_send_cmd(num_cmd, desc);
+	if (result) {
+		IPAERR("fail to send Reset Pipeline immediate command\n");
+		goto destroy_imm_cmd;
+	}
 
 	/* Reset to basic if reset = 1, otherwise set to DMA */
 	if (reset)
@@ -495,6 +540,10 @@ static int ipa_mpm_set_dma_mode(enum ipa_client_type src_pipe,
 
 	result = ipa_cfg_ep(ipa_get_ep_mapping(src_pipe), &ep_cfg);
 	IPA_MPM_FUNC_EXIT();
+
+destroy_imm_cmd:
+	for (i = 0; i < num_cmd; ++i)
+		ipahal_destroy_imm_cmd(cmd_pyld[i]);
 
 	return result;
 }
@@ -2467,6 +2516,12 @@ int ipa_mpm_mhip_xdci_pipe_enable(enum ipa_usb_teth_prot xdci_teth_prot)
 			IPA_CLIENT_MHI_PRIME_RMNET_CONS, false);
 		break;
 	case IPA_MPM_MHIP_USB_DPL:
+		if (!ipa3_is_odl_connected()) {
+			ipa_mpm_set_dma_mode(
+				IPA_CLIENT_MHI_PRIME_DPL_PROD,
+				IPA_CLIENT_USB_DPL_CONS, false);
+			IPA_MPM_DBG("setting DPL DMA to USB\n");
+		}
 		IPA_MPM_DBG("connecting DPL prot %d\n", mhip_client);
 		ipa_mpm_change_teth_state(probe_id, IPA_MPM_TETH_CONNECTED);
 		atomic_set(&ipa_mpm_ctx->adpl_over_usb_available, 1);
@@ -2923,26 +2978,18 @@ int ipa3_mpm_enable_adpl_over_odl(bool enable)
 	if (enable) {
 		/* inc clk count and set DMA to ODL */
 		IPA_MPM_DBG("mpm enabling ADPL over ODL\n");
-
+		ret = ipa_mpm_set_dma_mode(IPA_CLIENT_MHI_PRIME_DPL_PROD,
+			IPA_CLIENT_ODL_DPL_CONS, false);
+		if (ret) {
+			IPA_MPM_ERR("MPM failed to set dma mode to ODL\n");
+			return ret;
+		}
 		ret = ipa_mpm_vote_unvote_pcie_clk(CLK_ON,
 			IPA_MPM_MHIP_CH_ID_2, false, &is_acted);
 		if (ret) {
 			IPA_MPM_ERR("Err %d cloking on PCIe clk\n", ret);
 			return ret;
 		}
-
-		ret = ipa_mpm_set_dma_mode(IPA_CLIENT_MHI_PRIME_DPL_PROD,
-			IPA_CLIENT_ODL_DPL_CONS, false);
-		if (ret) {
-			IPA_MPM_ERR("MPM failed to set dma mode to ODL\n");
-			if (is_acted)
-				ipa_mpm_vote_unvote_pcie_clk(CLK_OFF,
-					IPA_MPM_MHIP_CH_ID_2,
-					false,
-					&is_acted);
-			return ret;
-		}
-
 		ipa_mpm_change_teth_state(IPA_MPM_MHIP_CH_ID_2,
 			IPA_MPM_TETH_CONNECTED);
 	} else {
@@ -2957,19 +3004,19 @@ int ipa3_mpm_enable_adpl_over_odl(bool enable)
 				return ret;
 		}
 
-		ret = ipa_mpm_set_dma_mode(IPA_CLIENT_MHI_PRIME_DPL_PROD,
-			IPA_CLIENT_USB_DPL_CONS, false);
-		if (ret) {
-			IPA_MPM_ERR("MPM failed to set dma mode to USB\n");
-			if (ipa_mpm_vote_unvote_pcie_clk(CLK_ON,
-				IPA_MPM_MHIP_CH_ID_2, false,
-				&is_acted))
-				IPA_MPM_ERR("Err clocking on pcie\n");
-			return ret;
-		}
-
 		/* If USB is not available then reset teth state */
 		if (atomic_read(&ipa_mpm_ctx->adpl_over_usb_available)) {
+			ret = ipa_mpm_set_dma_mode(
+				IPA_CLIENT_MHI_PRIME_DPL_PROD,
+				IPA_CLIENT_USB_DPL_CONS, false);
+			if (ret) {
+				IPA_MPM_ERR("MPM failed to set dma mode\n");
+				if (ipa_mpm_vote_unvote_pcie_clk(CLK_ON,
+					IPA_MPM_MHIP_CH_ID_2, false,
+					&is_acted))
+					IPA_MPM_ERR("Err clocking on pcie\n");
+				return ret;
+			}
 			IPA_MPM_DBG("mpm enabling ADPL over USB\n");
 		} else {
 			ipa_mpm_change_teth_state(IPA_MPM_MHIP_CH_ID_2,

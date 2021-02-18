@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -16,6 +16,17 @@
 #include "cam_flash_soc.h"
 #include "cam_flash_core.h"
 #include "cam_common_util.h"
+
+#if defined(CONFIG_LEDS_S2MPB02)
+#include <cam_sensor_cmn_header.h>
+#include <cam_sensor_util.h>
+
+struct msm_pinctrl_info flash_pctrl;
+#endif
+
+#if defined(CONFIG_LEDS_PMIC_QPNP)
+struct cam_flash_ctrl *g_flash_ctrl;
+#endif
 
 static int32_t cam_flash_driver_cmd(struct cam_flash_ctrl *fctrl,
 		void *arg, struct cam_flash_private_soc *soc_private)
@@ -71,7 +82,9 @@ static int32_t cam_flash_driver_cmd(struct cam_flash_ctrl *fctrl,
 		bridge_params.v4l2_sub_dev_flag = 0;
 		bridge_params.media_entity_flag = 0;
 		bridge_params.priv = fctrl;
+
 		bridge_params.dev_id = CAM_FLASH;
+
 		flash_acq_dev.device_handle =
 			cam_create_device_hdl(&bridge_params);
 		fctrl->bridge_intf.device_hdl =
@@ -320,14 +333,7 @@ static int cam_flash_platform_remove(struct platform_device *pdev)
 		return 0;
 	}
 
-	CAM_INFO(CAM_FLASH, "Platform remove invoked");
-	mutex_lock(&fctrl->flash_mutex);
-	cam_flash_shutdown(fctrl);
-	mutex_unlock(&fctrl->flash_mutex);
-	cam_unregister_subdev(&(fctrl->v4l2_dev_str));
-	platform_set_drvdata(pdev, NULL);
-	v4l2_set_subdevdata(&fctrl->v4l2_dev_str.sd, NULL);
-	kfree(fctrl);
+	devm_kfree(&pdev->dev, fctrl);
 
 	return 0;
 }
@@ -341,8 +347,6 @@ static int32_t cam_flash_i2c_driver_remove(struct i2c_client *client)
 		CAM_ERR(CAM_FLASH, "Flash device is NULL");
 		return -EINVAL;
 	}
-
-	CAM_INFO(CAM_FLASH, "i2c driver remove invoked");
 	/*Free Allocated Mem */
 	kfree(fctrl->i2c_data.per_frame);
 	fctrl->i2c_data.per_frame = NULL;
@@ -387,8 +391,6 @@ static int cam_flash_init_subdev(struct cam_flash_ctrl *fctrl)
 {
 	int rc = 0;
 
-	strlcpy(fctrl->device_name, CAM_FLASH_NAME,
-		sizeof(fctrl->device_name));
 	fctrl->v4l2_dev_str.internal_ops =
 		&cam_flash_internal_ops;
 	fctrl->v4l2_dev_str.ops = &cam_flash_subdev_ops;
@@ -500,7 +502,22 @@ static int32_t cam_flash_platform_probe(struct platform_device *pdev)
 
 	mutex_init(&(fctrl->flash_mutex));
 
+#if defined(CONFIG_LEDS_S2MPB02)
+	rc = msm_camera_pinctrl_init(&flash_pctrl, &pdev->dev);
+	if (rc >= 0) {
+		// make pin state to suspend
+		rc = pinctrl_select_state(flash_pctrl.pinctrl, flash_pctrl.gpio_state_suspend);
+		if (rc < 0) {
+			CAM_ERR(CAM_FLASH, "Cannot set pin to suspend state");
+			return rc;
+		}
+	}
+#endif
+
 	fctrl->flash_state = CAM_FLASH_STATE_INIT;
+#if defined(CONFIG_LEDS_PMIC_QPNP)
+        g_flash_ctrl = fctrl;
+#endif
 	CAM_DBG(CAM_FLASH, "Probe success");
 	return rc;
 
@@ -587,6 +604,9 @@ static int32_t cam_flash_i2c_driver_probe(struct i2c_client *client,
 
 	mutex_init(&(fctrl->flash_mutex));
 	fctrl->flash_state = CAM_FLASH_STATE_INIT;
+#if defined(CONFIG_LEDS_PMIC_QPNP)
+        g_flash_ctrl = fctrl;
+#endif
 
 	return rc;
 

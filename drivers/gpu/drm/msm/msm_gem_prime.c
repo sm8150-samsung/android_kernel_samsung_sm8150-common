@@ -17,6 +17,8 @@
 
 #include "msm_drv.h"
 #include "msm_gem.h"
+#include "sde_dbg.h"
+#include "sde_dbg.h"
 
 #include <linux/dma-buf.h>
 #include <linux/ion.h>
@@ -88,6 +90,8 @@ struct drm_gem_object *msm_gem_prime_import(struct drm_device *dev,
 	struct drm_gem_object *obj;
 	struct device *attach_dev;
 	unsigned long flags = 0;
+	dma_addr_t phys_addr;
+
 	int ret;
 
 	if (!dma_buf)
@@ -153,6 +157,8 @@ struct drm_gem_object *msm_gem_prime_import(struct drm_device *dev,
 	}
 
 	obj->import_attach = attach;
+	phys_addr = msm_gem_get_dma_addr(obj);
+	SDE_EVT32(obj->import_attach->dev, phys_addr, dma_buf, flags);
 
 	return obj;
 

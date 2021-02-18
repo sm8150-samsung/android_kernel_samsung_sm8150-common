@@ -5,6 +5,7 @@ obj-$(CONFIG_NEW_LEDS)			+= led-core.o
 obj-$(CONFIG_LEDS_CLASS)		+= led-class.o
 obj-$(CONFIG_LEDS_CLASS_FLASH)		+= led-class-flash.o
 obj-$(CONFIG_LEDS_TRIGGERS)		+= led-triggers.o
+obj-$(CONFIG_LEDS_SEP)			+= led-sep.o
 
 # LED Platform Drivers
 obj-$(CONFIG_LEDS_88PM860X)		+= leds-88pm860x.o
@@ -79,6 +80,9 @@ obj-$(CONFIG_LEDS_MLXCPLD)		+= leds-mlxcpld.o
 obj-$(CONFIG_LEDS_NIC78BX)		+= leds-nic78bx.o
 obj-$(CONFIG_LEDS_MT6323)		+= leds-mt6323.o
 obj-$(CONFIG_LEDS_QPNP_VIBRATOR_LDO)	+= leds-qpnp-vibrator-ldo.o
+obj-$(CONFIG_LEDS_S2MPB02)		+= leds-s2mpb02.o
+obj-$(CONFIG_LEDS_ET6312B)		+= leds-et6312b.o
+obj-$(CONFIG_LEDS_MAX77705_RGB)         += leds-max77705-rgb.o
 
 # LED SPI Drivers
 obj-$(CONFIG_LEDS_DAC124S085)		+= leds-dac124s085.o

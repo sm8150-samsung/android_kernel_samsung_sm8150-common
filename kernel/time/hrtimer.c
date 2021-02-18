@@ -56,6 +56,10 @@
 
 #include <linux/uaccess.h>
 
+#ifdef CONFIG_SEC_DEBUG
+#include <linux/sec_debug.h>
+#endif
+
 #include <trace/events/timer.h>
 
 #include "tick-internal.h"
@@ -1278,7 +1282,13 @@ static void __run_hrtimer(struct hrtimer_cpu_base *cpu_base,
 	 */
 	raw_spin_unlock(&cpu_base->lock);
 	trace_hrtimer_expire_entry(timer, now);
+#ifdef CONFIG_SEC_DEBUG_MSG_LOG
+	secdbg_msg("hrtimer %pS entry", fn);
+#endif
 	restart = fn(timer);
+#ifdef CONFIG_SEC_DEBUG_MSG_LOG
+	secdbg_msg("hrtimer %pS exit", fn);
+#endif
 	trace_hrtimer_expire_exit(timer);
 	raw_spin_lock(&cpu_base->lock);
 
@@ -1662,6 +1672,9 @@ int hrtimers_prepare_cpu(unsigned int cpu)
 	cpu_base->active_bases = 0;
 	cpu_base->cpu = cpu;
 	hrtimer_init_hres(cpu_base);
+
+	restore_pcpu_tick(cpu);
+
 	return 0;
 }
 
@@ -1750,6 +1763,7 @@ static void __migrate_hrtimers(unsigned int scpu, bool remove_pinned)
 int hrtimers_dead_cpu(unsigned int scpu)
 {
 	BUG_ON(cpu_online(scpu));
+	save_pcpu_tick(scpu);
 	tick_cancel_sched_timer(scpu);
 
 	__migrate_hrtimers(scpu, true);

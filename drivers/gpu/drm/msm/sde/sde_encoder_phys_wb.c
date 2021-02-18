@@ -1259,6 +1259,8 @@ static int _sde_encoder_phys_wb_wait_for_commit_done(
 		SDE_EVT32(DRMID(phys_enc->parent), WBID(wb_enc),
 			wb_enc->frame_count, SDE_EVTLOG_ERROR);
 		SDE_ERROR("wb:%d kickoff timed out\n", WBID(wb_enc));
+		SDE_EVT32(0xbadd);
+		SDE_DBG_DUMP("all", "dbg_bus", "vbif_dbg_bus", "panic");
 
 		event = sde_encoder_phys_wb_frame_timeout(phys_enc);
 	}

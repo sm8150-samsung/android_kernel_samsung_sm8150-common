@@ -27,6 +27,10 @@
 
 #include "sde_hdcp_2x.h"
 
+#ifdef CONFIG_SEC_DISPLAYPORT_ENG
+#include <linux/secdp_logger.h>
+#endif
+
 /* all message IDs */
 #define INVALID_MESSAGE        0
 #define AKE_INIT               2
@@ -1129,7 +1133,6 @@ static void sde_hdcp_2x_disable_work(struct kthread_work *work)
 	hdcp2_deinit(hdcp->hdcp2_ctx);
 	hdcp->hdcp2_ctx = NULL;
 }
-
 
 int sde_hdcp_2x_register(struct sde_hdcp_2x_register_data *data)
 {

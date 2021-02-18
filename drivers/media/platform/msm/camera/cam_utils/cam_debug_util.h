@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -45,9 +45,13 @@
 
 /* CAM_PERF: Used for performance (clock, BW etc) logs */
 #define CAM_PERF       (1 << 25)
+#if defined(CONFIG_SAMSUNG_APERTURE)
+#define CAM_APERTURE   (1 << 26)
+#endif
+#if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
+#define CAM_HWB        (1 << 27)
+#endif
 
-#define CAM_HYP        (1 << 26)
-#define CAM_IR_LED     (1 << 27)
 #define STR_BUFFER_MAX_LENGTH  1024
 
 /*
@@ -118,7 +122,7 @@ const char *cam_get_module_name(unsigned int module_id);
  * @args     :  Arguments which needs to be print in log
  */
 #define CAM_INFO_RATE_LIMIT(__module, fmt, args...)                 \
-	pr_info_ratelimited("CAM_INFO: %s: %s: %d " fmt "\n",            \
+	pr_err_ratelimited("CAM_INFO: %s: %s: %d " fmt "\n",            \
 		cam_get_module_name(__module), __func__,  __LINE__, ##args)
 
 /*

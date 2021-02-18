@@ -876,6 +876,43 @@ static const struct file_operations ufsdbg_host_regs_fops = {
 	.release	= single_release,
 };
 
+static int ufsdbg_phy_regs_show(struct seq_file *file, void *data)
+{
+	struct ufs_hba *hba = (struct ufs_hba *)file->private;
+	ufshcd_print_phy_regs(hba);
+
+	return 0;
+}
+
+static int ufsdbg_phy_regs_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, ufsdbg_phy_regs_show, inode->i_private);
+}
+
+static const struct file_operations ufsdbg_phy_regs_fops = {
+	.open		= ufsdbg_phy_regs_open,
+	.read		= seq_read,
+};
+
+static int ufsdbg_clk_state_show(struct seq_file *file, void *data)
+{
+	struct ufs_hba *hba = (struct ufs_hba *)file->private;
+	ufshcd_print_ufs_clk_state(hba);
+	ufshcd_print_phy_clk_state(hba);
+
+	return 0;
+}
+
+static int ufsdbg_clk_state_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, ufsdbg_clk_state_show, inode->i_private);
+}
+
+static const struct file_operations ufsdbg_clk_state_fops = {
+	.open		= ufsdbg_clk_state_open,
+	.read		= seq_read,
+};
+
 static int ufsdbg_dump_device_desc_show(struct seq_file *file, void *data)
 {
 	int err = 0;
@@ -1682,6 +1719,22 @@ void ufsdbg_add_debugfs(struct ufs_hba *hba)
 				&ufsdbg_host_regs_fops);
 	if (!hba->debugfs_files.host_regs) {
 		dev_err(hba->dev, "%s:  NULL hcd regs file, exiting", __func__);
+		goto err;
+	}
+
+	hba->debugfs_files.phy_regs = debugfs_create_file("phy_regs", S_IRUSR,
+			hba->debugfs_files.debugfs_root, hba,
+			&ufsdbg_phy_regs_fops);
+	if (!hba->debugfs_files.phy_regs) {
+		dev_err(hba->dev, "%s:  NULL phy regs file, exiting", __func__);
+		goto err;
+	}
+
+	hba->debugfs_files.clk_state = debugfs_create_file("clk_state", S_IRUSR,
+			hba->debugfs_files.debugfs_root, hba,
+			&ufsdbg_clk_state_fops);
+	if (!hba->debugfs_files.clk_state) {
+		dev_err(hba->dev, "%s:  NULL clk state file, exiting", __func__);
 		goto err;
 	}
 

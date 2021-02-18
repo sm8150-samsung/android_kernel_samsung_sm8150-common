@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0
 VERSION = 4
 PATCHLEVEL = 14
-SUBLEVEL = 180
+SUBLEVEL = 190
 EXTRAVERSION =
 NAME = Petit Gorille
 
@@ -377,7 +377,8 @@ endif
 # Make variables (CC, etc...)
 AS		= $(CROSS_COMPILE)as
 LD		= $(CROSS_COMPILE)ld
-REAL_CC		= $(CROSS_COMPILE)gcc
+# REAL_CC		= $(CROSS_COMPILE)gcc
+REAL_CC		= $(srctree)/toolchain/llvm-arm-toolchain-ship/10.0/bin/clang
 LDGOLD		= $(CROSS_COMPILE)ld.gold
 CPP		= $(CC) -E
 AR		= $(CROSS_COMPILE)ar
@@ -498,13 +499,14 @@ endif
 
 ifeq ($(cc-name),clang)
 ifneq ($(CROSS_COMPILE),)
-CLANG_TRIPLE	?= $(CROSS_COMPILE)
+# CLANG_TRIPLE	?= $(CROSS_COMPILE)
+CLANG_TRIPLE	?= aarch64-linux-gnu-
 CLANG_FLAGS	+= --target=$(notdir $(CLANG_TRIPLE:%-=%))
 ifeq ($(shell $(srctree)/scripts/clang-android.sh $(CC) $(CLANG_FLAGS)), y)
 $(error "Clang with Android --target detected. Did you specify CLANG_TRIPLE?")
 endif
 GCC_TOOLCHAIN_DIR := $(dir $(shell which $(CROSS_COMPILE)elfedit))
-CLANG_FLAGS	+= --prefix=$(GCC_TOOLCHAIN_DIR)
+CLANG_FLAGS	+= --prefix=$(GCC_TOOLCHAIN_DIR)$(notdir $(CROSS_COMPILE))
 GCC_TOOLCHAIN	:= $(realpath $(GCC_TOOLCHAIN_DIR)/..)
 endif
 ifneq ($(GCC_TOOLCHAIN),)
@@ -704,20 +706,14 @@ KBUILD_CFLAGS	+= $(call cc-disable-warning, address-of-packed-member)
 KBUILD_CFLAGS	+= $(call cc-disable-warning, attribute-alias)
 
 ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
-KBUILD_CFLAGS	+= -Os $(call cc-disable-warning,maybe-uninitialized,)
-else
-ifdef CONFIG_PROFILE_ALL_BRANCHES
-KBUILD_CFLAGS	+= -O2 $(call cc-disable-warning,maybe-uninitialized,)
+KBUILD_CFLAGS   += -Os
 else
 KBUILD_CFLAGS   += -O2
 endif
-endif
-
-KBUILD_CFLAGS += $(call cc-ifversion, -lt, 0409, \
-			$(call cc-disable-warning,maybe-uninitialized,))
 
 # Tell gcc to never replace conditional load with a non-conditional one
 KBUILD_CFLAGS	+= $(call cc-option,--param=allow-store-data-races=0)
+KBUILD_CFLAGS	+= $(call cc-option,-fno-allow-store-data-races)
 
 # check for 'asm goto'
 ifeq ($(shell $(CONFIG_SHELL) $(srctree)/scripts/gcc-goto.sh $(CC) $(KBUILD_CFLAGS)), y)
@@ -825,6 +821,25 @@ KBUILD_AFLAGS	+= -Wa,-gdwarf-2
 endif
 ifdef CONFIG_DEBUG_INFO_DWARF4
 KBUILD_CFLAGS	+= $(call cc-option, -gdwarf-4,)
+endif
+
+ifdef CONFIG_RKP_CFP
+# CFP_CC		?= $(srctree)/../../vendor/qcom/proprietary/llvm-arm-toolchain-ship/10.0/bin/clang
+CFP_CC		?= $(srctree)/toolchain/llvm-arm-toolchain-ship/10.0/bin/clang
+CC		= $(srctree)/scripts/gcc-wrapper.py $(CFP_CC)
+endif
+
+ifdef CONFIG_RKP_CFP_JOPP
+# Don't use jump tables for switch statements, since this generates indirect jump (br)
+# instructions, which are very dangerous for kernel control flow integrity.
+KBUILD_CFLAGS	+= -fno-jump-tables
+KBUILD_CFLAGS	+= $(call cc-option, -mllvm -cfp-jopp)
+endif
+
+ifdef CONFIG_RKP_CFP_ROPP
+# Register reservation is done by modifying compiler source code.
+# KBUILD_CFLAGS	+= -ffixed-x16 -ffixed-x17
+KBUILD_CFLAGS	+= $(call cc-option, -mllvm -cfp-ropp)
 endif
 
 ifdef CONFIG_DEBUG_INFO_REDUCED
@@ -940,6 +955,17 @@ KBUILD_CFLAGS += $(call cc-disable-warning, pointer-sign)
 # disable stringop warnings in gcc 8+
 KBUILD_CFLAGS += $(call cc-disable-warning, stringop-truncation)
 
+# We'll want to enable this eventually, but it's not going away for 5.7 at least
+KBUILD_CFLAGS += $(call cc-disable-warning, zero-length-bounds)
+KBUILD_CFLAGS += $(call cc-disable-warning, array-bounds)
+KBUILD_CFLAGS += $(call cc-disable-warning, stringop-overflow)
+
+# Another good warning that we'll want to enable eventually
+KBUILD_CFLAGS += $(call cc-disable-warning, restrict)
+
+# Enabled with W=2, disabled by default as noisy
+KBUILD_CFLAGS += $(call cc-disable-warning, maybe-uninitialized)
+
 # disable invalid "can't wrap" optimizations for signed / pointers
 KBUILD_CFLAGS	+= $(call cc-option,-fno-strict-overflow)
 
@@ -1011,6 +1037,23 @@ endif
 
 ifeq ($(CONFIG_RELR),y)
 LDFLAGS_vmlinux	+= --pack-dyn-relocs=relr
+endif
+
+USE_SECGETSPF := $(shell echo $(PATH))
+ifneq ($(findstring buildscript/build_common/core/bin, $(USE_SECGETSPF)),)
+  ifneq ($(shell secgetspf SEC_PRODUCT_FEATURE_BIOAUTH_CONFIG_FINGERPRINT_TZ), false)
+    ifeq ($(CONFIG_SENSORS_FINGERPRINT), y)
+      ifneq ($(SEC_FACTORY_BUILD), true)
+        export KBUILD_FP_SENSOR_CFLAGS := -DENABLE_SENSORS_FPRINT_SECURE
+      endif
+    endif
+  endif
+else
+  ifeq ($(CONFIG_SENSORS_FINGERPRINT), y)
+    ifneq ($(SEC_FACTORY_BUILD), true)
+      export KBUILD_FP_SENSOR_CFLAGS := -DENABLE_SENSORS_FPRINT_SECURE
+    endif
+  endif
 endif
 
 # Default kernel image to build when no specific target is given.
@@ -1327,12 +1370,17 @@ endif
 # needs to be updated, so this check is forced on all builds
 
 uts_len := 64
+ifneq (,$(BUILD_NUMBER))
+	UTS_RELEASE=$(KERNELRELEASE)-ab$(BUILD_NUMBER)
+else
+	UTS_RELEASE=$(KERNELRELEASE)
+endif
 define filechk_utsrelease.h
-	if [ `echo -n "$(KERNELRELEASE)" | wc -c ` -gt $(uts_len) ]; then \
-	  echo '"$(KERNELRELEASE)" exceeds $(uts_len) characters' >&2;    \
-	  exit 1;                                                         \
-	fi;                                                               \
-	(echo \#define UTS_RELEASE \"$(KERNELRELEASE)\";)
+	if [ `echo -n "$(UTS_RELEASE)" | wc -c ` -gt $(uts_len) ]; then \
+		echo '"$(UTS_RELEASE)" exceeds $(uts_len) characters' >&2;    \
+		exit 1;                                                       \
+	fi;                                                             \
+	(echo \#define UTS_RELEASE \"$(UTS_RELEASE)\";)
 endef
 
 define filechk_version.h
@@ -1383,6 +1431,7 @@ headers_install: __headers
 	$(Q)$(MAKE) $(hdr-inst)=include/uapi dst=include
 	$(Q)$(MAKE) $(hdr-inst)=arch/$(hdr-arch)/include/uapi $(hdr-dst)
 	$(Q)$(MAKE) $(hdr-inst)=techpack
+	$(Q)$(MAKE) $(hdr-inst)=techpack/audio/include/uapi dst=techpack/audio/include
 
 PHONY += headers_check_all
 headers_check_all: headers_install_all
@@ -1393,6 +1442,7 @@ headers_check: headers_install
 	$(Q)$(MAKE) $(hdr-inst)=include/uapi dst=include HDRCHECK=1
 	$(Q)$(MAKE) $(hdr-inst)=arch/$(hdr-arch)/include/uapi $(hdr-dst) HDRCHECK=1
 	$(Q)$(MAKE) $(hdr-inst)=techpack HDRCHECK=1
+	$(Q)$(MAKE) $(hdr-inst)=techpack/audio/include/uapi dst=techpack/audio/include HDRCHECK=1
 
 # ---------------------------------------------------------------------------
 # Kernel selftest

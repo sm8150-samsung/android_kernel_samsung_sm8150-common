@@ -24,6 +24,8 @@
 #include <soc/qcom/scm.h>
 #include <soc/qcom/secure_buffer.h>
 
+#include <trace/events/scm.h>
+
 DEFINE_MUTEX(secure_buffer_mutex);
 
 struct cp2_mem_chunks {
@@ -38,23 +40,11 @@ struct cp2_lock_req {
 	u32 lock;
 } __attribute__ ((__packed__));
 
-struct mem_prot_info {
-	phys_addr_t addr;
-	u64 size;
-};
-
 #define MEM_PROT_ASSIGN_ID		0x16
 #define MEM_PROTECT_LOCK_ID2		0x0A
 #define MEM_PROTECT_LOCK_ID2_FLAT	0x11
 #define V2_CHUNK_SIZE           SZ_1M
 #define FEATURE_ID_CP 12
-
-struct dest_vm_and_perm_info {
-	u32 vm;
-	u32 perm;
-	u64 ctx;
-	u32 ctx_size;
-};
 
 #define BATCH_MAX_SIZE SZ_2M
 #define BATCH_MAX_SECTIONS 32
@@ -302,6 +292,7 @@ static int __hyp_assign_table(struct sg_table *table,
 	    !dest_vmids || !dest_perms || !dest_nelems)
 		return -EINVAL;
 
+	trace_hyp_assign_table(__builtin_return_address(2));
 	/*
 	 * We can only pass cache-aligned sizes to hypervisor, so we need
 	 * to kmalloc and memcpy the source_vm_list here.

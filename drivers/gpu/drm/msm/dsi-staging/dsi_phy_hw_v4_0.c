@@ -559,8 +559,11 @@ int dsi_phy_hw_timing_val_v4_0(struct dsi_phy_per_lane_cfgs *timing_cfg,
 		return -EINVAL;
 	}
 
-	for (i = 0; i < size; i++)
+	for (i = 0; i < size; i++) {
 		timing_cfg->lane_v4[i] = timing_val[i];
+		// KR_TEMP
+		pr_err("%s : [%d] %x \n", __func__, i, timing_val[i]);
+	}
 	return 0;
 }
 

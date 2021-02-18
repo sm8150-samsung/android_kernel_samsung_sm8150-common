@@ -19,6 +19,13 @@
 
 #include <drm/drm_dp_helper.h>
 
+#ifdef CONFIG_SEC_DISPLAYPORT
+#include "secdp.h"
+#ifdef CONFIG_SEC_DISPLAYPORT_BIGDATA
+#include <linux/displayport_bigdata.h>
+#endif
+#endif
+
 #include "dp_catalog.h"
 #include "dp_audio.h"
 #include "dp_panel.h"
@@ -407,6 +414,11 @@ static int dp_audio_info_setup(struct platform_device *pdev,
 		return rc;
 	}
 
+#ifdef CONFIG_SEC_DISPLAYPORT_BIGDATA
+	secdp_bigdata_save_item(BD_AUD_CH, params->num_of_channels);
+	secdp_bigdata_save_item(BD_AUD_FREQ, params->sample_rate_hz);
+#endif
+
 	mutex_lock(&audio->ops_lock);
 
 	audio->channels = params->num_of_channels;
@@ -567,6 +579,8 @@ static int dp_audio_register_ext_disp(struct dp_audio_private *audio)
 	struct msm_ext_disp_init_data *ext;
 	struct msm_ext_disp_audio_codec_ops *ops;
 
+	pr_debug("+++\n");
+
 	ext = &audio->ext_audio_data;
 	ops = &ext->codec_ops;
 
@@ -669,6 +683,9 @@ static int dp_audio_notify(struct dp_audio_private *audio, u32 state)
 	if (rc)
 		goto end;
 
+#ifdef CONFIG_SEC_DISPLAYPORT
+	if (state == EXT_DISPLAY_CABLE_DISCONNECT) {
+#endif
 	if (atomic_read(&audio->acked))
 		goto end;
 
@@ -681,6 +698,9 @@ static int dp_audio_notify(struct dp_audio_private *audio, u32 state)
 		rc = -ETIMEDOUT;
 		goto end;
 	}
+#ifdef CONFIG_SEC_DISPLAYPORT
+	}
+#endif
 
 	pr_debug("success\n");
 end:
@@ -722,11 +742,20 @@ static int dp_audio_on(struct dp_audio *dp_audio)
 		return -EINVAL;
 	}
 
+#ifdef CONFIG_SEC_DISPLAYPORT
+	if (!secdp_get_cable_status()) {
+		pr_info("cable is out\n");
+		return -EINVAL;
+	}
+#endif
+
 	audio = container_of(dp_audio, struct dp_audio_private, dp_audio);
 	if (IS_ERR(audio)) {
 		pr_err("invalid input\n");
 		return -EINVAL;
 	}
+
+	pr_info("+++\n");
 
 	dp_audio_register_ext_disp(audio);
 
@@ -759,8 +788,17 @@ static int dp_audio_off(struct dp_audio *dp_audio)
 		return -EINVAL;
 	}
 
+	pr_info("+++\n");
+
 	audio = container_of(dp_audio, struct dp_audio_private, dp_audio);
 	ext = &audio->ext_audio_data;
+
+#ifdef CONFIG_SEC_DISPLAYPORT
+	if (!atomic_read(&audio->session_on)) {
+		pr_info("dp audio already off\n");
+		return rc;
+	}
+#endif
 
 	work_pending = cancel_delayed_work_sync(&audio->notify_delayed_work);
 	if (work_pending)
