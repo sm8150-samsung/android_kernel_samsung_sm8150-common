@@ -125,3 +125,4 @@ config KERNEL_MODE_NEON_DEBUG
 source "drivers/hwtracing/coresight/Kconfig"
 
 endmenu
+
